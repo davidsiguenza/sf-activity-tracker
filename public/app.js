@@ -218,13 +218,15 @@ function showApp() {
   });
   document.getElementById('settings-save-btn').addEventListener('click', saveSettings);
 
-  // Header "select all" toggles all selectable rows. Default = unchecked (opt-in).
+  // Header "select all" toggles only the rows currently VISIBLE under the active
+  // filters. Hidden rows keep their previous selection state. Default = unchecked.
   const selectAll = document.getElementById('select-all');
   selectAll.checked = false;
   selectAll.addEventListener('change', (e) => {
     for (const row of state.draftRows.values()) {
       const cls = row.classification;
       if (['already-logged', 'excluded', 'skip'].includes(cls.status)) continue;
+      if (row._visible === false) continue; // skip filtered-out rows
       row.selected = e.target.checked;
     }
     renderDraftPlan({ keepSelectAllState: true });
@@ -771,9 +773,13 @@ function renderDraftPlan(opts = {}) {
 }
 
 function syncSelectAllCheckbox() {
-  const selectable = [...state.draftRows.values()].filter(
-    (r) => !['already-logged', 'excluded', 'skip'].includes(r.classification.status)
-  );
+  // Only count rows that (a) are selectable by status AND (b) are currently visible.
+  // The checkbox should answer: "are all currently-visible selectable rows ticked?"
+  const selectable = [...state.draftRows.values()].filter((r) => {
+    if (['already-logged', 'excluded', 'skip'].includes(r.classification.status)) return false;
+    if (r._visible === false) return false;
+    return true;
+  });
   const all = selectable.length > 0 && selectable.every((r) => r.selected);
   const some = selectable.some((r) => r.selected);
   const cb = document.getElementById('select-all');
