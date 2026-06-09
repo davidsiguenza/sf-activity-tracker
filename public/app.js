@@ -453,13 +453,16 @@ function renderResults(result) {
     const googleColor = ev.colorId && GOOGLE_COLORS[ev.colorId]
       ? GOOGLE_COLORS[ev.colorId].hex
       : null;
+    // Map status to CSS class. The "already-logged" status uses the same visual
+    // as a freshly-logged event (gray + strikethrough), so collapse to event-logged.
+    const cssClass = status === 'already-logged' ? 'event-logged' : `event-${status}`;
     state.calendar.addEvent({
       id: ev.id,
       title: ev.summary,
       start: ev.start,
       end: ev.end,
       extendedProps: {
-        classes: [`event-${status}`],
+        classes: [cssClass],
         classification: cls,
         raw: ev,
         googleColor,
