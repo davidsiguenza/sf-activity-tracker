@@ -160,6 +160,7 @@ textarea { font-family: inherit; }
 .chip-skip { background: #f6f8fa; color: #57606a; }
 .chip-cf { background: #dcffe4; border-color: #2da44e; color: #1a7f37; }
 .chip-cr { background: #ddf4ff; border-color: #54aeff; color: #0969da; }
+.chip-new { background: #fbefff; border-color: #c297ff; color: #8250df; }
 
 .errors-bar {
   background: #ffebe9; border: 1px solid #ff8182; color: #82071e;

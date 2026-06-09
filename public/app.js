@@ -39,6 +39,7 @@ const state = {
     colors: new Set(),   // empty = no color filter (colorId strings; '' = "no color")
     cfOnly: false,       // true = only events with isCF
     crOnly: false,       // true = only events with isCR
+    freshOnly: false,    // true = only events freshly classified this run (not from cache)
   },
 };
 
@@ -50,6 +51,28 @@ function loadShowLogged() {
 }
 function saveShowLogged(v) {
   try { localStorage.setItem('sfat.showLogged', JSON.stringify(v)); } catch {}
+}
+
+// Last analyzed range — used to auto-restore the view on page load.
+// Lives in localStorage so it survives reloads but is per-browser.
+const LAST_RANGE_KEY = 'sfat.lastRange';
+const LAST_RANGE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+function loadLastRange() {
+  try {
+    const v = JSON.parse(localStorage.getItem(LAST_RANGE_KEY) || 'null');
+    if (!v || !v.fromDate || !v.toDate || !v.savedAt) return null;
+    if (Date.now() - v.savedAt > LAST_RANGE_TTL_MS) return null;
+    return v;
+  } catch { return null; }
+}
+function saveLastRange(fromDate, toDate) {
+  try {
+    localStorage.setItem(LAST_RANGE_KEY, JSON.stringify({ fromDate, toDate, savedAt: Date.now() }));
+  } catch {}
+}
+function clearLastRange() {
+  try { localStorage.removeItem(LAST_RANGE_KEY); } catch {}
 }
 
 // SE Task Type picklist values — mirrored from server/lib/prompts.js
@@ -228,6 +251,7 @@ function showApp() {
     state.filters.colors.clear();
     state.filters.cfOnly = false;
     state.filters.crOnly = false;
+    state.filters.freshOnly = false;
     textInput.value = '';
     rebuildFilterPills();
     syncChipActiveStates();
@@ -249,12 +273,24 @@ function showApp() {
     state.filters.statuses.clear();
     state.filters.cfOnly = false;
     state.filters.crOnly = false;
+    state.filters.freshOnly = false;
     syncChipActiveStates();
     rebuildFilterPills();
     applyAllFilters();
   });
 
   initCalendar();
+
+  // Auto-restore last analyzed range — only if recent (<24h) and the user
+  // hasn't disabled it. The analyze hits the classification cache so it's
+  // fast; the cache info bar will say "from cache" so the user knows.
+  const last = loadLastRange();
+  if (last) {
+    document.getElementById('from-date').value = last.fromDate;
+    document.getElementById('to-date').value = last.toDate;
+    // Defer one tick so the calendar finishes rendering first
+    setTimeout(() => runAnalyze(), 50);
+  }
 }
 
 function initCalendar() {
@@ -374,6 +410,8 @@ async function runAnalyze() {
     state.classifications = result.classifications || [];
     state.dcOpportunities = result.dcOpportunities || [];
     renderResults(result);
+    // Remember the last successfully-analyzed range so we can auto-restore on next page load
+    saveLastRange(fromDate, toDate);
     // Reset force-* toggles so the next click defaults to cached
     document.getElementById('force-refresh').checked = false;
     document.getElementById('force-reclassify').checked = false;
@@ -389,6 +427,7 @@ function renderResults(result) {
   const s = result.summary || { counts: {}, cfHours: 0, crHours: 0 };
   document.getElementById('summary-bar').classList.remove('hidden');
   const skipped = (s.counts.skip || 0) + (s.counts.excluded || 0);
+  paintChip('chip-fresh',      `${s.counts.fresh || 0} new`,                   (s.counts.fresh || 0) > 0);
   paintChip('chip-identified', `${s.counts.identified || 0} to log`,           (s.counts.identified || 0) > 0);
   paintChip('chip-logged',     `${s.counts.alreadyLogged || 0} already logged`, (s.counts.alreadyLogged || 0) > 0);
   paintChip('chip-flagged',    `${s.counts.flagged || 0} flagged`,              (s.counts.flagged || 0) > 0);
@@ -543,6 +582,9 @@ function isRowVisible(row) {
   if (state.filters.cfOnly && !cls.isCF) return false;
   if (state.filters.crOnly && !cls.isCR) return false;
 
+  // 6. Fresh-only — show only events that were freshly classified this run
+  if (state.filters.freshOnly && cls._fromCache !== false) return false;
+
   return true;
 }
 
@@ -574,6 +616,7 @@ function onChipClick(chip) {
   } else if (kind === 'bool') {
     if (value === 'cf') state.filters.cfOnly = !state.filters.cfOnly;
     else if (value === 'cr') state.filters.crOnly = !state.filters.crOnly;
+    else if (value === 'fresh') state.filters.freshOnly = !state.filters.freshOnly;
   }
 
   syncChipActiveStates();
@@ -615,7 +658,9 @@ function syncChipActiveStates() {
       const values = value.split(',');
       active = values.every((v) => state.filters.statuses.has(v));
     } else if (kind === 'bool') {
-      active = (value === 'cf' && state.filters.cfOnly) || (value === 'cr' && state.filters.crOnly);
+      active = (value === 'cf' && state.filters.cfOnly)
+            || (value === 'cr' && state.filters.crOnly)
+            || (value === 'fresh' && state.filters.freshOnly);
     }
     chip.classList.toggle('is-active', active);
   });
@@ -952,13 +997,14 @@ function markEventLogged(eventId) {
  * Recompute the summary chip counts from current state (after creations).
  */
 function updateSummaryChips() {
-  const counts = { identified: 0, alreadyLogged: 0, flagged: 0, skip: 0, excluded: 0 };
+  const counts = { identified: 0, alreadyLogged: 0, flagged: 0, skip: 0, excluded: 0, fresh: 0 };
   let cfHours = 0;
   let crHours = 0;
   for (const row of state.draftRows.values()) {
     const cls = row.classification;
     const key = cls.status === 'already-logged' ? 'alreadyLogged' : cls.status;
     counts[key] = (counts[key] || 0) + 1;
+    if (cls._fromCache === false) counts.fresh++;
     if (cls.status === 'identified') {
       const dur = row.event.durationHours || 0;
       if (cls.isCF) cfHours += dur;
@@ -966,6 +1012,7 @@ function updateSummaryChips() {
     }
   }
   const skippedTotal = counts.skip + counts.excluded;
+  paintChip('chip-fresh',      `${counts.fresh} new`,                    counts.fresh > 0);
   paintChip('chip-identified', `${counts.identified} to log`,           counts.identified > 0);
   paintChip('chip-logged',     `${counts.alreadyLogged} already logged`, counts.alreadyLogged > 0);
   paintChip('chip-flagged',    `${counts.flagged} flagged`,              counts.flagged > 0);

@@ -168,7 +168,8 @@ export async function analyze({ fromIso, toIso, config, forceRefresh = false, fo
     if (!forceReclassify) {
       const cached = classCache.get(ev.id, hash);
       if (cached) {
-        cachedClassifications.push(cached);
+        // Tag so the frontend can filter by "freshly classified this run"
+        cachedClassifications.push({ ...cached, _fromCache: true });
         continue;
       }
     }
@@ -242,9 +243,9 @@ export async function analyze({ fromIso, toIso, config, forceRefresh = false, fo
     );
 
     const fresh = batchResults.flat().map((c) => normalizeClassification(c));
-    classifications = [...cachedClassifications, ...fresh];
 
-    // Persist fresh classifications to cache for next analyze
+    // Persist fresh classifications to cache for next analyze (BEFORE tagging
+    // — the cache should hold the "clean" version without _fromCache flag).
     const cacheItems = fresh
       .filter((c) => c.eventId && eventHashes.has(c.eventId))
       .map((c) => ({
@@ -253,6 +254,10 @@ export async function analyze({ fromIso, toIso, config, forceRefresh = false, fo
         classification: c,
       }));
     if (cacheItems.length) classCache.setMany(cacheItems);
+
+    // Tag fresh ones so frontend can filter on "this run"
+    const freshTagged = fresh.map((c) => ({ ...c, _fromCache: false }));
+    classifications = [...cachedClassifications, ...freshTagged];
   } catch (e) {
     errors.push({ stage: 'classify', message: e.message });
   }

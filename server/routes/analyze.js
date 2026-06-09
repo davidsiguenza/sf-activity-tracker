@@ -47,6 +47,7 @@ function computeSummary(result) {
     excluded: 0,
     skip: 0,
     alreadyLogged: 0,
+    fresh: 0, // freshly classified this run (not from cache, not already-logged)
   };
   let cfHours = 0;
   let crHours = 0;
@@ -55,6 +56,7 @@ function computeSummary(result) {
     const c = result.classifications.find((x) => x.eventId === e.id);
     if (!c) continue;
     counts[c.status === 'already-logged' ? 'alreadyLogged' : c.status]++;
+    if (c._fromCache === false) counts.fresh++;
     if (c.status === 'identified') {
       const dur = e.durationHours || 0;
       if (c.isCF) cfHours += dur;
