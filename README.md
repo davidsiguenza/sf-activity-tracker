@@ -123,6 +123,32 @@ node server/index.js              # arranca y abre el browser
    - Click "Guardar y empezar"
 4. Listo. La app guarda todo en `~/.config/sf-activity-tracker/config.json`.
 
+## Auto-start at login (launchd)
+
+Para no tener que correr `node server/index.js` manualmente cada día, instala el LaunchAgent:
+
+```bash
+cd ~/Documents/Salesforce/tools/sf-activity-tracker
+./bin/launchd-install.sh install
+```
+
+A partir de ahí:
+- El server arranca **automáticamente al hacer login** en macOS
+- Si crashea se reinicia solo (con throttle de 10s para evitar bucles)
+- Logs combinados (stdout + stderr) en `~/Library/Logs/sf-activity-tracker.log`
+- El server NO abre el browser en cada arranque (`SF_AT_NO_OPEN=1`); solo cuando entras manualmente a `http://127.0.0.1:7825`
+
+Comandos útiles:
+
+```bash
+./bin/launchd-install.sh restart     # reiniciar tras tocar código backend
+./bin/launchd-install.sh status      # ver si está corriendo
+./bin/launchd-install.sh uninstall   # quitarlo
+tail -f ~/Library/Logs/sf-activity-tracker.log
+```
+
+> **Cuándo NO funciona**: si cierras el portátil totalmente (no solo dormirlo), el server se para hasta el siguiente login. launchd corre en sesión de usuario, no como servicio del sistema.
+
 ## Día a día
 
 1. Abre la app.

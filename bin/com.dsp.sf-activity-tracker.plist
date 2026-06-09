@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Reverse-DNS label, must be unique -->
+    <key>Label</key>
+    <string>com.dsp.sf-activity-tracker</string>
+
+    <!-- The Node binary + your server entry. Adjust if your node lives elsewhere. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/node</string>
+        <string>/Users/dsiguenza/Documents/Salesforce/tools/sf-activity-tracker/server/index.js</string>
+    </array>
+
+    <!-- Run from the project root so any relative paths resolve correctly -->
+    <key>WorkingDirectory</key>
+    <string>/Users/dsiguenza/Documents/Salesforce/tools/sf-activity-tracker</string>
+
+    <!-- Start as soon as the LaunchAgent is loaded (i.e. at login) -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Restart automatically if the process exits with a non-zero status -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <!-- PATH so child processes (claude, sf, gcloud) are findable.
+         launchd starts with a minimal PATH; we add the dirs the app needs. -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/Users/dsiguenza/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>/Users/dsiguenza</string>
+        <!-- Don't pop a browser tab on every restart -->
+        <key>SF_AT_NO_OPEN</key>
+        <string>1</string>
+    </dict>
+
+    <!-- Combined log file — tail this to see server output -->
+    <key>StandardOutPath</key>
+    <string>/Users/dsiguenza/Library/Logs/sf-activity-tracker.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/dsiguenza/Library/Logs/sf-activity-tracker.log</string>
+
+    <!-- Don't hammer relaunches if it crashes back-to-back -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+</dict>
+</plist>

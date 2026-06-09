@@ -199,11 +199,30 @@ Wellness</textarea>
         <p>Cuando corriges un Related To en la tabla, te ofrece guardarlo como alias para que el próximo evento con ese mismo keyword se clasifique solo. Lo mismo con las correcciones de SE Task Type.</p>
       </section>
       <section>
-        <h3>7 · Troubleshooting</h3>
+        <h3>7 · Auto-start del server (launchd)</h3>
+        <p>El server corre en background como LaunchAgent: arranca al hacer login en macOS, se reinicia solo si crashea, y los logs van a <code>~/Library/Logs/sf-activity-tracker.log</code>.</p>
+        <p><b>Comandos en tu terminal</b> (desde la carpeta del proyecto <code>~/Documents/Salesforce/tools/sf-activity-tracker</code>):</p>
+        <table>
+          <thead><tr><th>Cuándo</th><th>Comando</th></tr></thead>
+          <tbody>
+            <tr><td>Tras tocar código del backend (<code>server/</code>)</td><td><code>./bin/launchd-install.sh restart</code></td></tr>
+            <tr><td>Ver si está corriendo</td><td><code>./bin/launchd-install.sh status</code></td></tr>
+            <tr><td>Ver logs en vivo</td><td><code>tail -f ~/Library/Logs/sf-activity-tracker.log</code></td></tr>
+            <tr><td>Tras pull con cambios en el plist</td><td><code>./bin/launchd-install.sh install</code></td></tr>
+            <tr><td>Desactivar (quitar el auto-start)</td><td><code>./bin/launchd-install.sh uninstall</code></td></tr>
+          </tbody>
+        </table>
+        <p class="hint" style="margin-top: 8px;"><b>Tras cambios en frontend</b> (<code>public/</code>) basta con Cmd+R en el browser, no hace falta restart.</p>
+        <p class="hint"><b>Si cierras el portátil totalmente</b> el server se para hasta el próximo login. launchd corre en sesión de usuario.</p>
+      </section>
+
+      <section>
+        <h3>8 · Troubleshooting</h3>
         <ul>
           <li><b>Timeout en classify</b>: el clasificador se trocea en lotes de 10 eventos en paralelo. Si sigue fallando, reduce el rango.</li>
           <li><b>Backend en 🐢 Claude</b>: significa que no tienes Google API conectado. Settings → Connect with Google.</li>
           <li><b>Eventos faltan en el calendar</b>: revisa Settings → "Calendarios a leer" — quizá tienes deseleccionados algunos.</li>
+          <li><b>App no responde en localhost:7825 tras reboot</b>: <code>./bin/launchd-install.sh status</code>. Si dice "Not running", <code>install</code>. Mira logs si crashea repetidamente.</li>
         </ul>
       </section>
     </div>
