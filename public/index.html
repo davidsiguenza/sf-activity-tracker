@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SF Activity Tracker</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fullcalendar@5.10.1/main.min.css" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">🗓</span>
+      <h1>SF Activity Tracker</h1>
+    </div>
+    <div class="topbar-actions">
+      <span id="backend-badge" class="backend-badge backend-unknown" title="Calendar backend">…</span>
+      <span id="se-info" class="se-info">…</span>
+      <button id="help-btn" class="btn btn-ghost" title="Cómo funciona">? Help</button>
+      <button id="settings-btn" class="btn btn-ghost" title="Settings">⚙ Settings</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Setup wizard (shown when no config exists) -->
+    <section id="setup-wizard" class="card hidden">
+      <h2>Setup</h2>
+      <p>Vamos a configurar tu identidad en org62 y un par de preferencias.</p>
+      <label>Tu email Salesforce
+        <input type="email" id="setup-email" value="dsiguenza@salesforce.com" />
+      </label>
+      <button class="btn btn-primary" id="setup-resolve-btn">Resolver mi user en org62</button>
+      <div id="setup-resolve-result" class="hint"></div>
+
+      <hr/>
+
+      <label>SE Opportunity Role
+        <input type="text" id="setup-role" value="Core SE" />
+      </label>
+      <label>Títulos a excluir siempre (uno por línea)
+        <textarea id="setup-excluded" rows="4">Home
+Lunch
+OOO
+Out of Office
+Gym
+Wellness</textarea>
+      </label>
+      <button class="btn btn-primary" id="setup-save-btn" disabled>Guardar y empezar</button>
+    </section>
+
+    <!-- Main app -->
+    <section id="app" class="hidden">
+      <div class="control-bar card">
+        <label>Desde
+          <input type="date" id="from-date" />
+        </label>
+        <label>Hasta
+          <input type="date" id="to-date" />
+        </label>
+        <div class="quick-ranges">
+          <button class="btn btn-ghost" data-range="today">Hoy</button>
+          <button class="btn btn-ghost" data-range="yesterday">Ayer</button>
+          <button class="btn btn-ghost" data-range="thisweek">Esta semana</button>
+          <button class="btn btn-ghost" data-range="lastweek">Semana pasada</button>
+          <button class="btn btn-ghost" data-range="thismonth">Este mes</button>
+        </div>
+        <label class="force-refresh-toggle" title="Skip the cached calendar fetch and re-query Google Calendar">
+          <input type="checkbox" id="force-refresh" />
+          <span>Force refresh</span>
+        </label>
+        <button id="analyze-btn" class="btn btn-primary">▶ Analyze</button>
+      </div>
+      <div id="cache-info" class="cache-info hidden"></div>
+
+      <div id="summary-bar" class="summary-bar card hidden">
+        <span class="chip chip-id" id="chip-identified">0 to log</span>
+        <span class="chip chip-logged" id="chip-logged">0 already logged</span>
+        <span class="chip chip-flag" id="chip-flagged">0 flagged</span>
+        <span class="chip chip-skip" id="chip-skipped">0 skipped</span>
+        <span class="chip chip-cf" id="chip-cf">0.0 CF hrs</span>
+        <span class="chip chip-cr" id="chip-cr">0.0 CR hrs</span>
+        <label class="toggle-logged">
+          <input type="checkbox" id="toggle-show-logged" />
+          <span>Show already logged</span>
+        </label>
+      </div>
+
+      <div id="errors-bar" class="errors-bar hidden"></div>
+
+      <div id="filter-panel" class="filter-panel card hidden">
+        <div class="filter-panel-group">
+          <label for="filter-text">Filter:</label>
+          <input type="search" id="filter-text" placeholder="title or description…" />
+        </div>
+        <div class="filter-panel-group" id="filter-status-group">
+          <label>Status:</label>
+          <!-- pills inserted dynamically -->
+        </div>
+        <div class="filter-panel-group" id="filter-color-group">
+          <label>Color:</label>
+          <!-- google color pills inserted dynamically -->
+        </div>
+        <div class="filter-actions">
+          <button class="btn btn-ghost" id="filter-reset">Reset filters</button>
+        </div>
+      </div>
+
+      <div id="calendar" class="card"></div>
+
+      <div id="draft-plan-card" class="card hidden">
+        <div class="draft-header">
+          <h2>Draft plan</h2>
+          <button id="create-btn" class="btn btn-success" disabled>Create in org62</button>
+        </div>
+        <table id="draft-plan-table">
+          <thead>
+            <tr>
+              <th><input type="checkbox" id="select-all" checked /></th>
+              <th>Event</th>
+              <th>Date · Time</th>
+              <th>Hrs</th>
+              <th>Related To</th>
+              <th>Confidence</th>
+              <th>SE Task Type</th>
+              <th>CF</th>
+              <th>CR</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div id="progress-card" class="card hidden">
+        <h3>Creating in org62…</h3>
+        <ul id="progress-log"></ul>
+      </div>
+    </section>
+  </main>
+
+  <!-- Help / Guide modal -->
+  <div id="help-modal" class="modal hidden">
+    <div class="modal-content">
+      <header>
+        <h2>Cómo funciona SF Activity Tracker</h2>
+        <button class="btn btn-ghost" id="help-close">✕</button>
+      </header>
+      <section>
+        <h3>1 · Para qué sirve</h3>
+        <p>Lee tu Google Calendar de un rango de fechas, identifica con qué oportunidades de org62 se relaciona cada evento, lo clasifica por SE Task Type / CF / CR, y crea los Events + Deal Contributions con un click — sin abrir Activity Editor.</p>
+      </section>
+      <section>
+        <h3>2 · Setup inicial (una vez)</h3>
+        <ol>
+          <li><b>Conecta Google Calendar</b> en Settings → "Connect with Google". Te lleva al flujo OAuth en el browser. Sin terminal, sin gcloud.</li>
+          <li><b>Selecciona qué calendarios leer</b>. Por defecto todos; tildando solo los que importan (tu primary + los de equipo) reduces ruido.</li>
+          <li><b>Aliases y catch-all</b> (opcional): los va aprendiendo solo cuando corriges matchings.</li>
+        </ol>
+      </section>
+      <section>
+        <h3>3 · Día a día</h3>
+        <ol>
+          <li><b>Selecciona un rango</b> (Hoy / Ayer / Esta semana / Semana pasada / Este mes o fechas custom).</li>
+          <li>Pulsa <b>▶ Analyze</b>. Tarda ~5-30s con Google API directo. Si tildas <i>Force refresh</i> ignora el cache.</li>
+          <li><b>Revisa el calendario</b>. Cada evento toma color según su estado (ver leyenda).</li>
+          <li><b>Edita el draft plan</b> de la tabla: cambia Related To, SE Task Type, CF/CR. Tilda con check los que quieres crear.</li>
+          <li><b>Pulsa "Create N in org62"</b>. Stream de progreso, los logueados se marcan en gris automáticamente.</li>
+        </ol>
+      </section>
+      <section>
+        <h3>4 · Leyenda de colores del calendario</h3>
+        <ul style="list-style: none; padding-left: 0;">
+          <li><span style="display: inline-block; width: 14px; height: 14px; background: #b6e3ff; border: 2px dashed #0969da; vertical-align: middle; margin-right: 6px;"></span> <b>Identified</b>: el clasificador lo asignó a una oportunidad → se va a crear si lo tildas.</li>
+          <li><span style="display: inline-block; width: 14px; height: 14px; background: #d0d7de; border: 1px solid #57606a; vertical-align: middle; margin-right: 6px;"></span> <b>Already logged</b>: ya existe un Event en org62 con ese subject + start. No se duplica.</li>
+          <li><span style="display: inline-block; width: 14px; height: 14px; background: #ffec99; border: 2px solid #bf8700; vertical-align: middle; margin-right: 6px;"></span> <b>Flagged</b>: el clasificador no encontró match claro. Revisa manualmente el Related To.</li>
+          <li><span style="display: inline-block; width: 14px; height: 14px; background: #f6f8fa; border: 1px dotted #afb8c1; vertical-align: middle; margin-right: 6px;"></span> <b>Excluded / skip</b>: descartado (título excluido, RSVP=declined, OOO, etc.). No se loguea.</li>
+        </ul>
+        <p class="hint">La franja de color a la izquierda de cada evento es el color original que tiene en Google Calendar.</p>
+      </section>
+      <section>
+        <h3>5 · Filtros y atajos</h3>
+        <ul>
+          <li><b>Click en un evento del calendario</b> → resalta su fila en la tabla. Click otra vez → quita el resaltado.</li>
+          <li><b>Click en una fila</b> → navega el calendario al día y resalta el evento.</li>
+          <li><b>Filter panel</b>: caja de texto, pills de status y de color de Google Calendar.</li>
+          <li><b>Show already logged</b>: por defecto los logueados se ocultan para vista limpia. Tilda para verlos.</li>
+        </ul>
+      </section>
+      <section>
+        <h3>6 · Aprendizaje progresivo</h3>
+        <p>Cuando corriges un Related To en la tabla, te ofrece guardarlo como alias para que el próximo evento con ese mismo keyword se clasifique solo. Lo mismo con las correcciones de SE Task Type.</p>
+      </section>
+      <section>
+        <h3>7 · Troubleshooting</h3>
+        <ul>
+          <li><b>Timeout en classify</b>: el clasificador se trocea en lotes de 10 eventos en paralelo. Si sigue fallando, reduce el rango.</li>
+          <li><b>Backend en 🐢 Claude</b>: significa que no tienes Google API conectado. Settings → Connect with Google.</li>
+          <li><b>Eventos faltan en el calendar</b>: revisa Settings → "Calendarios a leer" — quizá tienes deseleccionados algunos.</li>
+        </ul>
+      </section>
+    </div>
+  </div>
+
+  <!-- Settings modal -->
+  <div id="settings-modal" class="modal hidden">
+    <div class="modal-content">
+      <header>
+        <h2>Settings</h2>
+        <button class="btn btn-ghost" id="settings-close">✕</button>
+      </header>
+      <section id="google-api-section">
+        <h3>Google Calendar backend</h3>
+        <p class="hint">Conecta tu Google Calendar para fetch directo (rápido, sin tokens LLM). Setup en la app, sin terminal.</p>
+
+        <div id="google-oauth-status" class="hint">Comprobando…</div>
+
+        <!-- Step 1: Upload OAuth client JSON -->
+        <details id="oauth-step-client" style="margin-top: 8px;">
+          <summary><b>Paso 1</b> · Sube tu OAuth client JSON</summary>
+          <p class="hint" style="margin-top: 8px;">
+            Si todavía no lo tienes, créalo en
+            <a href="https://console.cloud.google.com/apis/credentials" target="_blank">GCP Console</a>:
+            crea un proyecto, habilita "Google Calendar API", crea OAuth client ID tipo <b>Desktop app</b>,
+            y en "Authorized redirect URIs" añade <code style="user-select: all;">http://127.0.0.1:7825/api/oauth/callback</code>.
+            Descarga el JSON y pégalo aquí:
+          </p>
+          <textarea id="oauth-client-json" rows="6" placeholder='{"installed":{"client_id":"...","client_secret":"...","redirect_uris":["http://127.0.0.1:7825/api/oauth/callback"]}}' style="width: 100%; font-family: monospace; font-size: 11px;"></textarea>
+          <button class="btn btn-primary" id="oauth-save-client-btn" style="margin-top: 6px;">Save client JSON</button>
+        </details>
+
+        <!-- Step 2: Authorize -->
+        <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+          <button class="btn btn-success" id="oauth-connect-btn">⚡ Connect with Google</button>
+          <button class="btn btn-ghost" id="oauth-disconnect-btn">Disconnect</button>
+          <button class="btn btn-ghost" id="google-api-clear-cache-btn">Clear calendar cache</button>
+        </div>
+      </section>
+
+      <section id="calendar-picker-section">
+        <h3>Calendarios a leer</h3>
+        <p class="hint">Tilda los calendarios desde los que quieres traer eventos. Sin selección = todos los visibles.</p>
+        <div id="calendar-picker-list" class="calendar-picker-list">
+          <span class="hint">Conecta Google API primero para ver tu lista de calendarios.</span>
+        </div>
+        <div style="margin-top: 8px; display: flex; gap: 8px;">
+          <button class="btn btn-ghost" id="calendar-picker-load-btn">Reload list</button>
+          <button class="btn btn-ghost" id="calendar-picker-all-btn">Select all</button>
+          <button class="btn btn-ghost" id="calendar-picker-none-btn">Select none</button>
+          <button class="btn btn-primary" id="calendar-picker-save-btn">Save selection</button>
+        </div>
+      </section>
+
+      <section>
+        <h3>Aliases</h3>
+        <p class="hint">Cuando un keyword del título matchea con un alias, se usa el record mapeado directamente.</p>
+        <table id="alias-table"><thead><tr><th>Alias</th><th>Match</th></tr></thead><tbody></tbody></table>
+      </section>
+      <section>
+        <h3>Correcciones de Task Type</h3>
+        <table id="correction-table"><thead><tr><th>Keyword</th><th>SE Task Type</th></tr></thead><tbody></tbody></table>
+      </section>
+      <section>
+        <h3>Catch-all record</h3>
+        <p class="hint">Record opcional para actividades sin opp clara (ej. enablement interno).</p>
+        <div id="catchall-display" class="hint">No configurado.</div>
+      </section>
+      <section>
+        <h3>Excluded titles</h3>
+        <textarea id="settings-excluded" rows="4"></textarea>
+        <button class="btn btn-primary" id="settings-save-btn">Guardar</button>
+      </section>
+      <section>
+        <h3>Config raw</h3>
+        <details><summary>Ver JSON</summary><pre id="config-raw"></pre></details>
+      </section>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/fullcalendar@5.10.1/main.min.js"></script>
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

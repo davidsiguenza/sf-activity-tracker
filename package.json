@@ -1,0 +1,19 @@
+{
+  "name": "sf-activity-tracker",
+  "version": "0.1.0",
+  "description": "Local web app to auto-log Google Calendar events into Salesforce org62 Activity Editor (Events + DCs). Zero-dependency: only Node built-ins, no npm install required.",
+  "main": "server/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "author": "David Sigüenza <dsiguenza@salesforce.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/davidsiguenza/sf-activity-tracker"
+  }
+}
