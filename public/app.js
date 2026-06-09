@@ -1115,6 +1115,19 @@ function buildStatusCell(cls) {
   sub.title = reason;
   sub.textContent = reason.length > 60 ? reason.slice(0, 60) + '…' : reason;
   cell.appendChild(sub);
+
+  // Two-tier closed-opp check warning
+  if (cls._closedOppCheck && cls._closedOppCheck.status !== 'open-at-event') {
+    const warn = document.createElement('div');
+    warn.className = 'closed-opp-warning';
+    const isHard = cls._closedOppCheck.status === 'closed-at-event';
+    warn.classList.toggle('closed-opp-warning-hard', isHard);
+    warn.title = cls._closedOppCheck.warning || '';
+    warn.textContent = isHard
+      ? '⚠ Opp was already closed on event date'
+      : 'ℹ Opp closed status on event date unverifiable';
+    cell.appendChild(warn);
+  }
   return cell;
 }
 

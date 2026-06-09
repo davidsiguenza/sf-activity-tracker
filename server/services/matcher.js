@@ -306,6 +306,9 @@ export async function analyze({ fromIso, toIso, config, forceRefresh = false, fo
     };
   });
 
+  // 11pre) Overlay user overrides BEFORE the closed-opp check, so the check
+  //         runs against the user's chosen relatedTo, not Claude's original.
+  //         (kept inline below for backwards compat — original block was named 11)
   // 11) Overlay user overrides on top of classifications (relatedTo, seTaskType, CF/CR).
   //     The override's hash must match the current event hash — otherwise the event was
   //     edited in Google and the override is stale, so we ignore it.
@@ -329,6 +332,17 @@ export async function analyze({ fromIso, toIso, config, forceRefresh = false, fo
   }
   classifyMeta.overridesApplied = overridesApplied;
 
+  // 12) Two-tier closed-opp check.
+  //     For each event matched to an Opportunity that is currently closed,
+  //     verify the opp was actually open at the event time.
+  //
+  //     Tier 1 (free): event.start <= Opp.CloseDate → was open. Else inconclusive.
+  //     Tier 2 (one batched query): inspect OpportunityFieldHistory for the
+  //         StageName transition into a closed-stage. If event.start < that
+  //         transition → was open. If event.start >= that transition → closed.
+  //         If history not available (>18 months retention) → unknown, allow with warning.
+  await applyClosedOppCheck(allClassifications, enrichedEvents, dcOpportunities);
+
   return {
     events: enrichedEvents,
     dcOpportunities,
@@ -337,6 +351,134 @@ export async function analyze({ fromIso, toIso, config, forceRefresh = false, fo
     calendarMeta,
     classifyMeta,
   };
+}
+
+/**
+ * Two-tier verification that an event matched to a closed Opportunity actually
+ * happened while the opp was still open. Mutates classifications in place.
+ *
+ *   Tier 1 (free): event.start <= opp.CloseDate → was open. Done.
+ *                  Otherwise mark as inconclusive and proceed to Tier 2.
+ *   Tier 2 (1 batched SOQL on OpportunityFieldHistory): walk the StageName
+ *                  history to find when the opp first transitioned to a closed
+ *                  stage. Compare against event date.
+ *
+ * Result is stamped on classification._closedOppCheck:
+ *   { tier: 1|2, status: 'open-at-event'|'closed-at-event'|'unknown', ... }
+ *
+ * If status is 'closed-at-event' the row is downgraded to 'flagged' so the
+ * user explicitly reviews before logging. 'unknown' keeps the original status
+ * but adds a warning the UI can render.
+ */
+async function applyClosedOppCheck(classifications, events, dcs) {
+  // Step A: gather candidates and run Tier 1
+  const inconclusive = []; // [{ classification, event, dc }]
+
+  for (const c of classifications) {
+    if (c.status !== 'identified') continue;
+    if (c.relatedTo?.type !== 'Opportunity') continue;
+
+    const dc = dcs.find((d) => d.opportunityId === c.relatedTo.id);
+    if (!dc) continue; // pasted-URL opps without DC info — skip the check
+    if (!dc.opportunityIsClosed) continue; // opp is open today → no check needed
+
+    const event = events.find((e) => e.id === c.eventId);
+    if (!event?.start) continue;
+    const eventDate = new Date(event.start);
+
+    // Tier 1 — compare with CloseDate (date, not datetime)
+    if (dc.opportunityCloseDate) {
+      const closeDate = new Date(dc.opportunityCloseDate);
+      if (eventDate <= closeDate) {
+        c._closedOppCheck = { tier: 1, status: 'open-at-event' };
+        continue;
+      }
+    }
+
+    // Tier 1 inconclusive — queue for Tier 2
+    inconclusive.push({ classification: c, eventDate, dc });
+  }
+
+  if (inconclusive.length === 0) return;
+
+  // Step B: Tier 2 — single SOQL for all inconclusive opps
+  const oppIds = [...new Set(inconclusive.map((x) => x.dc.opportunityId))];
+  const idList = oppIds.map((id) => `'${id}'`).join(',');
+
+  let history = [];
+  try {
+    history = await query(
+      `SELECT OpportunityId, OldValue, NewValue, CreatedDate
+       FROM OpportunityFieldHistory
+       WHERE OpportunityId IN (${idList})
+         AND Field = 'StageName'
+       ORDER BY CreatedDate ASC`
+    );
+  } catch (e) {
+    // Field history can be locked-down per OU — surface as 'unknown' for all
+    for (const it of inconclusive) {
+      it.classification._closedOppCheck = {
+        tier: 2,
+        status: 'unknown',
+        warning: `Could not query stage history (${e.message?.slice(0, 80)}). Verify manually.`,
+      };
+    }
+    return;
+  }
+
+  // Step C: index history by Opp Id and apply per item
+  const byOpp = new Map();
+  for (const h of history) {
+    if (!byOpp.has(h.OpportunityId)) byOpp.set(h.OpportunityId, []);
+    byOpp.get(h.OpportunityId).push(h);
+  }
+
+  for (const it of inconclusive) {
+    const oppHistory = byOpp.get(it.dc.opportunityId) || [];
+    const verdict = wasOpenAt(oppHistory, it.eventDate);
+    if (verdict === 'open') {
+      it.classification._closedOppCheck = { tier: 2, status: 'open-at-event' };
+    } else if (verdict === 'closed') {
+      it.classification._closedOppCheck = {
+        tier: 2,
+        status: 'closed-at-event',
+        warning: 'Opportunity was already closed on the event date per stage history.',
+      };
+      // Downgrade so the user must explicitly review (skipping or repointing)
+      it.classification.status = 'flagged';
+    } else {
+      it.classification._closedOppCheck = {
+        tier: 2,
+        status: 'unknown',
+        warning: 'Stage history unavailable (likely >18 months). Verify manually.',
+      };
+    }
+  }
+}
+
+/**
+ * Determine if an Opportunity was in a "closed" stage at the given event date,
+ * based on its StageName field history.
+ *
+ * Strategy: scan history (sorted ASC) and find the FIRST transition where
+ * NewValue contains a "closed" keyword. That's when the opp closed.
+ *   - event before that transition → 'open'
+ *   - event at or after            → 'closed'
+ *   - no closed transition in history but opp IS closed today → 'unknown'
+ *     (likely the close happened before retention window)
+ */
+function wasOpenAt(history, eventDate) {
+  if (!history || history.length === 0) return 'unknown';
+  const closedKeywords = ['closed', 'won', 'lost', 'cancelled', 'canceled'];
+  for (const h of history) {
+    const newStage = String(h.NewValue || '').toLowerCase();
+    const isCloseTransition = closedKeywords.some((k) => newStage.includes(k));
+    if (isCloseTransition) {
+      const closedAt = new Date(h.CreatedDate);
+      return eventDate < closedAt ? 'open' : 'closed';
+    }
+  }
+  return 'unknown';
 }
 
 /**
