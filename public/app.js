@@ -330,24 +330,28 @@ async function runAnalyze() {
   const toIso = `${toDate}T23:59:59`;
 
   const forceRefresh = document.getElementById('force-refresh').checked;
+  const forceReclassify = document.getElementById('force-reclassify').checked;
 
   const btn = document.getElementById('analyze-btn');
   btn.disabled = true;
-  btn.textContent = forceRefresh
-    ? '⏳ Refreshing from Google… (puede tardar hasta 5 min)'
+  btn.textContent = forceReclassify
+    ? '⏳ Re-classifying all events…'
+    : forceRefresh
+    ? '⏳ Refreshing from Google…'
     : '⏳ Analyzing…';
 
   try {
     const result = await fetchJson('/api/analyze', {
       method: 'POST',
-      body: { fromIso, toIso, forceRefresh },
+      body: { fromIso, toIso, forceRefresh, forceReclassify },
     });
     state.events = result.events || [];
     state.classifications = result.classifications || [];
     state.dcOpportunities = result.dcOpportunities || [];
     renderResults(result);
-    // Reset force-refresh so the next click defaults to cached
+    // Reset force-* toggles so the next click defaults to cached
     document.getElementById('force-refresh').checked = false;
+    document.getElementById('force-reclassify').checked = false;
   } catch (e) {
     showError(`Analyze failed: ${e.message}`);
   } finally {
@@ -380,10 +384,17 @@ function renderResults(result) {
     })[backend] || backend;
 
     let txt = result.calendarMeta.fromCache
-      ? `📦 Calendar served from cache (fetched ${ago} via ${backendLabel}). Tick "Force refresh" before Analyze to re-query.`
-      : `🔄 Calendar fetched fresh at ${when.toLocaleTimeString('es-ES')} via ${backendLabel}. Cache valid 30 min.`;
+      ? `📦 Calendar from cache (fetched ${ago} via ${backendLabel}).`
+      : `🔄 Calendar fetched fresh at ${when.toLocaleTimeString('es-ES')} via ${backendLabel}.`;
+    if (result.classifyMeta) {
+      const { cacheHits, freshClassifications } = result.classifyMeta;
+      const total = cacheHits + freshClassifications;
+      if (total > 0) {
+        txt += `  ·  🧠 Classification: ${cacheHits} from cache, ${freshClassifications} fresh.`;
+      }
+    }
     if (result.calendarMeta.fellBackTo) {
-      txt += ` — Fallback reason: ${result.calendarMeta.fallbackReason || 'unknown'}`;
+      txt += ` — Fallback: ${result.calendarMeta.fallbackReason || 'unknown'}`;
     }
     cacheInfo.textContent = txt;
 
@@ -877,6 +888,8 @@ async function openSettings() {
   await refreshGoogleApiSection();
   // Calendar picker — only meaningful when Google API is configured
   await refreshCalendarPicker();
+  // Classification cache stats
+  await refreshClassCacheSection();
 
   const aliasBody = document.querySelector('#alias-table tbody');
   aliasBody.replaceChildren();
@@ -1016,6 +1029,39 @@ function paintOauthStatus(el, s) {
   }
   el.style.color = '#57606a';
   el.textContent = '⏵ Sin conectar. Sube tu OAuth client JSON (Paso 1) y pulsa Connect.';
+}
+
+// ─── Classification cache section ────────────────────────────────────────────
+
+async function refreshClassCacheSection() {
+  const statsEl = document.getElementById('class-cache-stats');
+  const pruneBtn = document.getElementById('class-cache-prune-btn');
+  const clearBtn = document.getElementById('class-cache-clear-btn');
+
+  pruneBtn.onclick = async () => {
+    const r = await fetchJson('/api/cache/prune', { method: 'POST' });
+    statsEl.textContent = `✓ Pruned ${r.pruned} entries older than 90 days.`;
+    setTimeout(refreshClassCacheSection, 800);
+  };
+  clearBtn.onclick = async () => {
+    if (!confirm('Borrar todas las clasificaciones cacheadas? El próximo Analyze re-clasificará todo.')) return;
+    await fetchJson('/api/cache/clear', { method: 'POST' });
+    statsEl.textContent = '✓ Cache cleared.';
+    setTimeout(refreshClassCacheSection, 800);
+  };
+
+  try {
+    const s = await fetchJson('/api/cache/stats');
+    if (s.count === 0) {
+      statsEl.textContent = 'Sin clasificaciones cacheadas todavía. La primera vez que analices se irán guardando.';
+    } else {
+      const oldest = s.oldestAt ? new Date(s.oldestAt).toLocaleDateString('es-ES') : '—';
+      const newest = s.newestAt ? new Date(s.newestAt).toLocaleDateString('es-ES') : '—';
+      statsEl.textContent = `${s.count} clasificaciones cacheadas · más antigua: ${oldest} · más nueva: ${newest}`;
+    }
+  } catch (e) {
+    statsEl.textContent = `Error: ${e.message}`;
+  }
 }
 
 // ─── Calendar picker section ─────────────────────────────────────────────────

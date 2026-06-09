@@ -5,6 +5,7 @@ import { query } from './salesforce.js';
 import { runJson } from './claude.js';
 import { buildMatchSystemPrompt, buildMatchUserPrompt, TAXONOMY_BY_VALUE } from '../lib/prompts.js';
 import { MATCH_SCHEMA } from '../lib/schemas.js';
+import * as classCache from './classification-cache.js';
 
 /**
  * Fetch the SE's active Deal Contributions with related Opportunity + Account info.
@@ -75,10 +76,12 @@ function dedupeKey(subject, startIso) {
  * @param {string} opts.toIso
  * @param {Object} opts.config - the user config
  * @param {boolean} [opts.forceRefresh] - bypass calendar cache
+ * @param {boolean} [opts.forceReclassify] - bypass classification cache, re-classify everything
  */
-export async function analyze({ fromIso, toIso, config, forceRefresh = false }) {
+export async function analyze({ fromIso, toIso, config, forceRefresh = false, forceReclassify = false }) {
   const errors = [];
   let calendarMeta = { fromCache: false, fetchedAt: null, backend: null };
+  let classifyMeta = { cacheHits: 0, freshClassifications: 0 };
 
   // 1) Fetch calendar — Google API direct if configured, else claude -p fallback. Cached 30 min.
   let events = [];
@@ -149,11 +152,33 @@ export async function analyze({ fromIso, toIso, config, forceRefresh = false }) 
       })),
       errors,
       calendarMeta,
+      classifyMeta,
     };
   }
 
-  // 8) Build the slimmed-down event payload sent to Claude (no big htmlLinks etc.)
-  const slimEvents = needsClassification.map((e) => ({
+  // 7b) Classification cache lookup — skip events we've already classified.
+  // Hash captures (subject|start|end|attendeeCount). If unchanged, reuse.
+  const eventHashes = new Map(); // eventId → hash
+  const cachedClassifications = []; // already-classified, keep as-is
+  const toClassify = []; // need claude run
+
+  for (const ev of needsClassification) {
+    const hash = classCache.eventHash(ev);
+    eventHashes.set(ev.id, hash);
+    if (!forceReclassify) {
+      const cached = classCache.get(ev.id, hash);
+      if (cached) {
+        cachedClassifications.push(cached);
+        continue;
+      }
+    }
+    toClassify.push(ev);
+  }
+  classifyMeta.cacheHits = cachedClassifications.length;
+  classifyMeta.freshClassifications = toClassify.length;
+
+  // 8) Build the slimmed-down event payload sent to Claude — ONLY events not in cache.
+  const slimEvents = toClassify.map((e) => ({
     id: e.id,
     summary: e.summary,
     start: e.start,
@@ -174,8 +199,12 @@ export async function analyze({ fromIso, toIso, config, forceRefresh = false }) 
 
   // 9) Classify via claude -p — split into parallel batches so a single
   //    long-running call doesn't exceed the timeout.
-  let classifications = [];
-  try {
+  //    SKIP this entirely if every event was a cache hit.
+  let classifications = [...cachedClassifications];
+
+  if (slimEvents.length === 0) {
+    // Everything came from cache — short-circuit to step 10
+  } else try {
     const systemPrompt = buildMatchSystemPrompt({
       dcOpportunities,
       aliasTable: config.aliasTable || [],
@@ -212,7 +241,18 @@ export async function analyze({ fromIso, toIso, config, forceRefresh = false }) 
       })
     );
 
-    classifications = batchResults.flat().map((c) => normalizeClassification(c));
+    const fresh = batchResults.flat().map((c) => normalizeClassification(c));
+    classifications = [...cachedClassifications, ...fresh];
+
+    // Persist fresh classifications to cache for next analyze
+    const cacheItems = fresh
+      .filter((c) => c.eventId && eventHashes.has(c.eventId))
+      .map((c) => ({
+        eventId: c.eventId,
+        hash: eventHashes.get(c.eventId),
+        classification: c,
+      }));
+    if (cacheItems.length) classCache.setMany(cacheItems);
   } catch (e) {
     errors.push({ stage: 'classify', message: e.message });
   }
@@ -252,6 +292,7 @@ export async function analyze({ fromIso, toIso, config, forceRefresh = false }) 
     classifications: allClassifications,
     errors,
     calendarMeta,
+    classifyMeta,
   };
 }
 

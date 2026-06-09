@@ -7,6 +7,7 @@ import * as createRoute from './create.js';
 import * as healthRoute from './health.js';
 import * as calendarRoute from './calendar.js';
 import * as oauthRoute from './oauth.js';
+import * as cacheRoute from './cache.js';
 
 const ROUTES = [
   { method: 'GET', path: '/api/health', handler: healthRoute.get },
@@ -29,6 +30,10 @@ const ROUTES = [
   { method: 'POST', path: '/api/oauth/start',      handler: oauthRoute.startHandler },
   { method: 'GET',  path: '/api/oauth/callback',   handler: oauthRoute.callbackHandler },
   { method: 'POST', path: '/api/oauth/disconnect', handler: oauthRoute.disconnectHandler },
+  // Classification cache
+  { method: 'GET',  path: '/api/cache/stats', handler: cacheRoute.stats },
+  { method: 'POST', path: '/api/cache/clear', handler: cacheRoute.clear },
+  { method: 'POST', path: '/api/cache/prune', handler: cacheRoute.prune },
 ];
 
 export function match(method, path) {

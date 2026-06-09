@@ -7,6 +7,7 @@ import {
   addTaxonomyCorrection,
   configPath,
 } from '../lib/config-store.js';
+import * as classCache from '../services/classification-cache.js';
 
 export async function get({ sendJson, res }) {
   const cfg = load();
@@ -30,7 +31,9 @@ export async function addAliasHandler({ body, sendJson, res }) {
     return sendJson(res, 400, { error: 'Body requires { alias: string, matches: [{id,name,type}] }' });
   }
   const cfg = addAlias(alias, matches);
-  return sendJson(res, 200, { ok: true, aliasTable: cfg.aliasTable });
+  // New alias means past classifications might now match differently — invalidate cache
+  classCache.clearAll();
+  return sendJson(res, 200, { ok: true, aliasTable: cfg.aliasTable, classCacheCleared: true });
 }
 
 export async function addCorrectionHandler({ body, sendJson, res }) {
@@ -39,5 +42,6 @@ export async function addCorrectionHandler({ body, sendJson, res }) {
     return sendJson(res, 400, { error: 'Body requires { keyword: string, seTaskType: string }' });
   }
   const cfg = addTaxonomyCorrection(keyword, seTaskType);
-  return sendJson(res, 200, { ok: true, taxonomyCorrections: cfg.taxonomyCorrections });
+  classCache.clearAll();
+  return sendJson(res, 200, { ok: true, taxonomyCorrections: cfg.taxonomyCorrections, classCacheCleared: true });
 }

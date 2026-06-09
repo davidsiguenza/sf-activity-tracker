@@ -10,7 +10,7 @@ export async function post({ body, sendJson, res }) {
   if (!cfg || !cfg.seUserId) {
     return sendJson(res, 400, { error: 'Setup not complete. Run /api/setup first.' });
   }
-  const { fromIso, toIso, forceRefresh } = body || {};
+  const { fromIso, toIso, forceRefresh, forceReclassify } = body || {};
   if (!fromIso || !toIso) {
     return sendJson(res, 400, { error: 'fromIso and toIso required (ISO 8601)' });
   }
@@ -25,7 +25,13 @@ export async function post({ body, sendJson, res }) {
     return sendJson(res, 400, { error: 'toIso must be >= fromIso' });
   }
 
-  const result = await analyze({ fromIso, toIso, config: cfg, forceRefresh: !!forceRefresh });
+  const result = await analyze({
+    fromIso,
+    toIso,
+    config: cfg,
+    forceRefresh: !!forceRefresh,
+    forceReclassify: !!forceReclassify,
+  });
 
   // Compute summary
   const summary = computeSummary(result);

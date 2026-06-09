@@ -68,6 +68,10 @@ Wellness</textarea>
           <input type="checkbox" id="force-refresh" />
           <span>Force refresh</span>
         </label>
+        <label class="force-refresh-toggle" title="Re-classify ALL events with claude, ignoring the persistent classification cache">
+          <input type="checkbox" id="force-reclassify" />
+          <span>Re-classify all</span>
+        </label>
         <button id="analyze-btn" class="btn btn-primary">▶ Analyze</button>
       </div>
       <div id="cache-info" class="cache-info hidden"></div>
@@ -259,6 +263,16 @@ Wellness</textarea>
         <h3>Correcciones de Task Type</h3>
         <table id="correction-table"><thead><tr><th>Keyword</th><th>SE Task Type</th></tr></thead><tbody></tbody></table>
       </section>
+      <section>
+        <h3>Classification cache</h3>
+        <p class="hint">Eventos ya clasificados se guardan en disco y NO se re-clasifican en analizes posteriores (instantáneos para esos). Se invalida solo cuando guardas un alias o corrección.</p>
+        <div id="class-cache-stats" class="hint">Cargando…</div>
+        <div style="margin-top: 8px; display: flex; gap: 8px;">
+          <button class="btn btn-ghost" id="class-cache-prune-btn">Prune (>90 días)</button>
+          <button class="btn btn-ghost" id="class-cache-clear-btn">Clear cache</button>
+        </div>
+      </section>
+
       <section>
         <h3>Catch-all record</h3>
         <p class="hint">Record opcional para actividades sin opp clara (ej. enablement interno).</p>
