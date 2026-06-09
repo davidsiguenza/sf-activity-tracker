@@ -199,7 +199,15 @@ Wellness</textarea>
         <p>Cuando corriges un Related To en la tabla, te ofrece guardarlo como alias para que el próximo evento con ese mismo keyword se clasifique solo. Lo mismo con las correcciones de SE Task Type.</p>
       </section>
       <section>
-        <h3>7 · Auto-start del server (launchd)</h3>
+        <h3>7 · Acceso rápido desde el escritorio</h3>
+        <p>Si quieres un icono en el escritorio para abrir la app de un click:</p>
+        <pre style="user-select: all;">cd ~/Documents/Salesforce/tools/sf-activity-tracker
+./bin/install-desktop-shortcut.sh</pre>
+        <p class="hint">A partir de ahí: doble-click en <b>"SF Activity Tracker"</b> de tu Desktop. Comprueba si el server está corriendo, lo arranca si hace falta, y abre tu browser en <code>http://127.0.0.1:7825</code>. Pasa <code>--symlink</code> si prefieres que el icono siga actualizándose con la última versión del repo.</p>
+      </section>
+
+      <section>
+        <h3>8 · Auto-start del server (launchd)</h3>
         <p>El server corre en background como LaunchAgent: arranca al hacer login en macOS, se reinicia solo si crashea, y los logs van a <code>~/Library/Logs/sf-activity-tracker.log</code>.</p>
         <p><b>Comandos en tu terminal</b> (desde la carpeta del proyecto <code>~/Documents/Salesforce/tools/sf-activity-tracker</code>):</p>
         <table>
@@ -217,7 +225,7 @@ Wellness</textarea>
       </section>
 
       <section>
-        <h3>8 · Troubleshooting</h3>
+        <h3>9 · Troubleshooting</h3>
         <ul>
           <li><b>Timeout en classify</b>: el clasificador se trocea en lotes de 10 eventos en paralelo. Si sigue fallando, reduce el rango.</li>
           <li><b>Backend en 🐢 Claude</b>: significa que no tienes Google API conectado. Settings → Connect with Google.</li>

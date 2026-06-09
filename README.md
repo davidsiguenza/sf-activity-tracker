@@ -123,6 +123,15 @@ node server/index.js              # arranca y abre el browser
    - Click "Guardar y empezar"
 4. Listo. La app guarda todo en `~/.config/sf-activity-tracker/config.json`.
 
+## Acceso rápido desde el escritorio
+
+```bash
+cd ~/Documents/Salesforce/tools/sf-activity-tracker
+./bin/install-desktop-shortcut.sh
+```
+
+Crea **"SF Activity Tracker.command"** en tu Desktop. Doble-click → comprueba si el server corre, lo arranca si hace falta vía launchd, y abre el browser en `http://127.0.0.1:7825`. Pasa `--symlink` si prefieres que se actualice automáticamente con `git pull`.
+
 ## Auto-start at login (launchd)
 
 Para no tener que correr `node server/index.js` manualmente cada día, instala el LaunchAgent:
