@@ -86,6 +86,12 @@ Esto crea `~/.config/gcloud/application_default_credentials.json` con un refresh
 
 **Verificar**: ⚙ Settings → "Test connection" en la sección "Google Calendar backend".
 
+## Para nuevos usuarios
+
+**Si no eres David**: lee la **[guía paso-a-paso para nuevos usuarios → SETUP.md](./SETUP.md)**.
+
+Cubre todo: pre-requisitos, clonar el repo, autenticar `sf` CLI, crear tu propio OAuth client en GCP Console, conectar Google Calendar desde la app, instalar auto-start, y atajo en el desktop. ~15-20 min total.
+
 ## Pre-requisitos
 
 - macOS (probado en Darwin 25.x)
