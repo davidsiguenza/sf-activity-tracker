@@ -77,12 +77,15 @@ Wellness</textarea>
       <div id="cache-info" class="cache-info hidden"></div>
 
       <div id="summary-bar" class="summary-bar card hidden">
-        <span class="chip chip-id" id="chip-identified">0 to log</span>
-        <span class="chip chip-logged" id="chip-logged">0 already logged</span>
-        <span class="chip chip-flag" id="chip-flagged">0 flagged</span>
-        <span class="chip chip-skip" id="chip-skipped">0 skipped</span>
-        <span class="chip chip-cf" id="chip-cf">0.0 CF hrs</span>
-        <span class="chip chip-cr" id="chip-cr">0.0 CR hrs</span>
+        <span class="chip chip-id"     id="chip-identified" data-filter="status" data-value="identified" title="Click para ver solo los identificados">0 to log</span>
+        <span class="chip chip-logged" id="chip-logged"     data-filter="status" data-value="already-logged" title="Click para ver solo los ya logueados">0 already logged</span>
+        <span class="chip chip-flag"   id="chip-flagged"    data-filter="status" data-value="flagged" title="Click para ver solo los que necesitan revisión">0 flagged</span>
+        <span class="chip chip-skip"   id="chip-skipped"    data-filter="status-multi" data-value="skip,excluded" title="Click para ver solo skip + excluded">0 skipped</span>
+        <span class="chip chip-cf"     id="chip-cf"         data-filter="bool" data-value="cf" title="Click para ver solo los Customer-Facing">0.0 CF hrs</span>
+        <span class="chip chip-cr"     id="chip-cr"         data-filter="bool" data-value="cr" title="Click para ver solo los Customer-Related">0.0 CR hrs</span>
+        <span class="chip-divider"></span>
+        <button id="chips-all-btn"   class="chip-action" title="Activar todos los chips de status">All</button>
+        <button id="chips-clear-btn" class="chip-action" title="Apagar todos los filtros de chips">Clear</button>
         <label class="toggle-logged">
           <input type="checkbox" id="toggle-show-logged" />
           <span>Show already logged</span>

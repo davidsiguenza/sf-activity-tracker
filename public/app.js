@@ -37,6 +37,8 @@ const state = {
     text: '',
     statuses: new Set(), // empty = no status filter
     colors: new Set(),   // empty = no color filter (colorId strings; '' = "no color")
+    cfOnly: false,       // true = only events with isCF
+    crOnly: false,       // true = only events with isCR
   },
 };
 
@@ -224,7 +226,30 @@ function showApp() {
     state.filters.text = '';
     state.filters.statuses.clear();
     state.filters.colors.clear();
+    state.filters.cfOnly = false;
+    state.filters.crOnly = false;
     textInput.value = '';
+    rebuildFilterPills();
+    syncChipActiveStates();
+    applyAllFilters();
+  });
+
+  // Summary chips → clickable filters
+  document.querySelectorAll('.summary-bar .chip').forEach((chip) => {
+    chip.addEventListener('click', () => onChipClick(chip));
+  });
+  // All / Clear shortcuts for chip filters
+  document.getElementById('chips-all-btn').addEventListener('click', () => {
+    activateAllChips();
+    syncChipActiveStates();
+    rebuildFilterPills();
+    applyAllFilters();
+  });
+  document.getElementById('chips-clear-btn').addEventListener('click', () => {
+    state.filters.statuses.clear();
+    state.filters.cfOnly = false;
+    state.filters.crOnly = false;
+    syncChipActiveStates();
     rebuildFilterPills();
     applyAllFilters();
   });
@@ -363,12 +388,14 @@ async function runAnalyze() {
 function renderResults(result) {
   const s = result.summary || { counts: {}, cfHours: 0, crHours: 0 };
   document.getElementById('summary-bar').classList.remove('hidden');
-  document.getElementById('chip-identified').textContent = `${s.counts.identified || 0} to log`;
-  document.getElementById('chip-logged').textContent = `${s.counts.alreadyLogged || 0} already logged`;
-  document.getElementById('chip-flagged').textContent = `${s.counts.flagged || 0} flagged`;
-  document.getElementById('chip-skipped').textContent = `${(s.counts.skip || 0) + (s.counts.excluded || 0)} skipped`;
-  document.getElementById('chip-cf').textContent = `${s.cfHours} CF hrs`;
-  document.getElementById('chip-cr').textContent = `${s.crHours} CR hrs`;
+  const skipped = (s.counts.skip || 0) + (s.counts.excluded || 0);
+  paintChip('chip-identified', `${s.counts.identified || 0} to log`,           (s.counts.identified || 0) > 0);
+  paintChip('chip-logged',     `${s.counts.alreadyLogged || 0} already logged`, (s.counts.alreadyLogged || 0) > 0);
+  paintChip('chip-flagged',    `${s.counts.flagged || 0} flagged`,              (s.counts.flagged || 0) > 0);
+  paintChip('chip-skipped',    `${skipped} skipped`,                            skipped > 0);
+  paintChip('chip-cf',         `${s.cfHours} CF hrs`,                           (s.cfHours || 0) > 0);
+  paintChip('chip-cr',         `${s.crHours} CR hrs`,                           (s.crHours || 0) > 0);
+  syncChipActiveStates();
 
   // Cache info indicator
   const cacheInfo = document.getElementById('cache-info');
@@ -509,11 +536,87 @@ function isRowVisible(row) {
     if (!haystack.includes(state.filters.text)) return false;
   }
 
+  // 5. CF / CR booleans (from chips)
+  if (state.filters.cfOnly && !cls.isCF) return false;
+  if (state.filters.crOnly && !cls.isCR) return false;
+
   return true;
 }
 
 // Backward-compat alias used elsewhere; just delegates.
 function applyShowLoggedFilter() { applyAllFilters(); }
+
+/**
+ * Handle a click on one of the summary chips (status, status-multi, or bool).
+ * Each chip toggles the corresponding filter state. Multiple chips can be
+ * active at once and combine (intersection).
+ */
+function onChipClick(chip) {
+  // Disabled chips (count=0) don't filter
+  if (chip.classList.contains('chip-disabled')) return;
+
+  const kind = chip.dataset.filter;
+  const value = chip.dataset.value;
+  if (!kind || !value) return;
+
+  if (kind === 'status') {
+    if (state.filters.statuses.has(value)) state.filters.statuses.delete(value);
+    else state.filters.statuses.add(value);
+  } else if (kind === 'status-multi') {
+    // "skipped" chip = skip + excluded together. Toggle both at once.
+    const values = value.split(',');
+    const allOn = values.every((v) => state.filters.statuses.has(v));
+    if (allOn) values.forEach((v) => state.filters.statuses.delete(v));
+    else values.forEach((v) => state.filters.statuses.add(v));
+  } else if (kind === 'bool') {
+    if (value === 'cf') state.filters.cfOnly = !state.filters.cfOnly;
+    else if (value === 'cr') state.filters.crOnly = !state.filters.crOnly;
+  }
+
+  syncChipActiveStates();
+  // Status pills in the filter panel mirror the same state — refresh them too
+  rebuildFilterPills();
+  applyAllFilters();
+}
+
+/**
+ * Turn ON every status chip that has events behind it. CF/CR booleans stay off
+ * (they're "include-only" by nature, and combining them with all status filters
+ * would over-restrict the view).
+ */
+function activateAllChips() {
+  for (const chip of document.querySelectorAll('.summary-bar .chip')) {
+    if (chip.classList.contains('chip-disabled')) continue;
+    const kind = chip.dataset.filter;
+    const value = chip.dataset.value;
+    if (kind === 'status') {
+      state.filters.statuses.add(value);
+    } else if (kind === 'status-multi') {
+      value.split(',').forEach((v) => state.filters.statuses.add(v));
+    }
+    // Skip 'bool' chips (CF / CR) — they over-restrict if both turned on
+  }
+}
+
+/**
+ * Repaint the .is-active class on each chip based on current state.filters.
+ */
+function syncChipActiveStates() {
+  document.querySelectorAll('.summary-bar .chip').forEach((chip) => {
+    const kind = chip.dataset.filter;
+    const value = chip.dataset.value;
+    let active = false;
+    if (kind === 'status') {
+      active = state.filters.statuses.has(value);
+    } else if (kind === 'status-multi') {
+      const values = value.split(',');
+      active = values.every((v) => state.filters.statuses.has(v));
+    } else if (kind === 'bool') {
+      active = (value === 'cf' && state.filters.cfOnly) || (value === 'cr' && state.filters.crOnly);
+    }
+    chip.classList.toggle('is-active', active);
+  });
+}
 
 /**
  * Rebuild the status / color pills based on what's actually in the current data.
@@ -859,12 +962,25 @@ function updateSummaryChips() {
       if (cls.isCR) crHours += dur;
     }
   }
-  document.getElementById('chip-identified').textContent = `${counts.identified} to log`;
-  document.getElementById('chip-logged').textContent = `${counts.alreadyLogged} already logged`;
-  document.getElementById('chip-flagged').textContent = `${counts.flagged} flagged`;
-  document.getElementById('chip-skipped').textContent = `${counts.skip + counts.excluded} skipped`;
-  document.getElementById('chip-cf').textContent = `${(Math.round(cfHours * 100) / 100)} CF hrs`;
-  document.getElementById('chip-cr').textContent = `${(Math.round(crHours * 100) / 100)} CR hrs`;
+  const skippedTotal = counts.skip + counts.excluded;
+  paintChip('chip-identified', `${counts.identified} to log`,           counts.identified > 0);
+  paintChip('chip-logged',     `${counts.alreadyLogged} already logged`, counts.alreadyLogged > 0);
+  paintChip('chip-flagged',    `${counts.flagged} flagged`,              counts.flagged > 0);
+  paintChip('chip-skipped',    `${skippedTotal} skipped`,                skippedTotal > 0);
+  const cfHrs = Math.round(cfHours * 100) / 100;
+  const crHrs = Math.round(crHours * 100) / 100;
+  paintChip('chip-cf',         `${cfHrs} CF hrs`,                        cfHrs > 0);
+  paintChip('chip-cr',         `${crHrs} CR hrs`,                        crHrs > 0);
+
+  syncChipActiveStates();
+}
+
+/** Set chip text + disabled state if there's nothing to filter on. */
+function paintChip(id, text, enabled) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle('chip-disabled', !enabled);
 }
 
 function appendLog(textStr, kind) {
