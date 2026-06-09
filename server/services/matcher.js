@@ -6,10 +6,16 @@ import { runJson } from './claude.js';
 import { buildMatchSystemPrompt, buildMatchUserPrompt, TAXONOMY_BY_VALUE } from '../lib/prompts.js';
 import { MATCH_SCHEMA } from '../lib/schemas.js';
 import * as classCache from './classification-cache.js';
+import * as overrides from './overrides-store.js';
 
 /**
- * Fetch the SE's active Deal Contributions with related Opportunity + Account info.
+ * Fetch the SE's Deal Contributions with related Opportunity + Account info.
+ * Filters out DCs whose Opportunity has been closed for more than CLOSED_DC_TTL_DAYS.
+ * Old long-closed opps clutter the dropdown and confuse the classifier; if the user
+ * really needs to log against one, they can paste its URL via the manual flow.
  */
+const CLOSED_DC_TTL_DAYS = 30;
+
 export async function fetchDcOpportunities(seUserId) {
   const records = await query(
     `SELECT Id, Opportunity__c, Opportunity__r.Name, Opportunity__r.IsClosed,
@@ -21,17 +27,26 @@ export async function fetchDcOpportunities(seUserId) {
      WHERE SE_Name__c = '${seUserId}' AND IsDeleted = FALSE
      ORDER BY CreatedDate DESC`
   );
-  return records.map((r) => ({
-    dcId: r.Id,
-    opportunityId: r.Opportunity__c,
-    opportunityName: r.Opportunity__r?.Name || '',
-    opportunityIsClosed: !!r.Opportunity__r?.IsClosed,
-    opportunityCloseDate: r.Opportunity__r?.CloseDate || null,
-    accountId: r.Opportunity__r?.AccountId || null,
-    accountName: r.Opportunity__r?.Account?.Name || '',
-    accountParentName: r.Opportunity__r?.Account?.Parent?.Name || '',
-    splitPercentage: r.Split_Percentage__c ?? null,
-  }));
+
+  const cutoff = Date.now() - CLOSED_DC_TTL_DAYS * 24 * 60 * 60 * 1000;
+  return records
+    .map((r) => ({
+      dcId: r.Id,
+      opportunityId: r.Opportunity__c,
+      opportunityName: r.Opportunity__r?.Name || '',
+      opportunityIsClosed: !!r.Opportunity__r?.IsClosed,
+      opportunityCloseDate: r.Opportunity__r?.CloseDate || null,
+      accountId: r.Opportunity__r?.AccountId || null,
+      accountName: r.Opportunity__r?.Account?.Name || '',
+      accountParentName: r.Opportunity__r?.Account?.Parent?.Name || '',
+      splitPercentage: r.Split_Percentage__c ?? null,
+    }))
+    .filter((d) => {
+      // Keep all open opps. Drop opps closed before the cutoff.
+      if (!d.opportunityIsClosed) return true;
+      if (!d.opportunityCloseDate) return true; // unknown close date — keep, edge case
+      return new Date(d.opportunityCloseDate).getTime() >= cutoff;
+    });
 }
 
 /**
@@ -290,6 +305,29 @@ export async function analyze({ fromIso, toIso, config, forceRefresh = false, fo
       reasoning: 'Classifier did not return a result for this event',
     };
   });
+
+  // 11) Overlay user overrides on top of classifications (relatedTo, seTaskType, CF/CR).
+  //     The override's hash must match the current event hash — otherwise the event was
+  //     edited in Google and the override is stale, so we ignore it.
+  //     Also stamp _hash on every classification so the frontend can post overrides back.
+  const overrideMap = overrides.getMany(eventHashes);
+  let overridesApplied = 0;
+  for (const c of allClassifications) {
+    const hash = eventHashes.get(c.eventId);
+    if (hash) c._hash = hash;
+    const ovr = overrideMap.get(c.eventId);
+    if (!ovr) continue;
+    if (c.status === 'already-logged') continue; // shouldn't have an override anyway
+    if (ovr.relatedTo !== undefined) c.relatedTo = ovr.relatedTo;
+    if (ovr.seTaskType !== undefined) c.seTaskType = ovr.seTaskType;
+    if (ovr.isCF !== undefined) c.isCF = ovr.isCF;
+    if (ovr.isCR !== undefined) c.isCR = ovr.isCR;
+    c._userEdited = true;
+    // If the user manually picked a relatedTo for a flagged event, promote it to identified
+    if (c.status === 'flagged' && c.relatedTo) c.status = 'identified';
+    overridesApplied++;
+  }
+  classifyMeta.overridesApplied = overridesApplied;
 
   return {
     events: enrichedEvents,

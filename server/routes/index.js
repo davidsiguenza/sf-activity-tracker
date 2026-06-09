@@ -8,6 +8,7 @@ import * as healthRoute from './health.js';
 import * as calendarRoute from './calendar.js';
 import * as oauthRoute from './oauth.js';
 import * as cacheRoute from './cache.js';
+import * as overridesRoute from './overrides.js';
 
 const ROUTES = [
   { method: 'GET', path: '/api/health', handler: healthRoute.get },
@@ -18,6 +19,7 @@ const ROUTES = [
   { method: 'POST', path: '/api/setup/resolve-user', handler: setupRoute.resolveUser },
   { method: 'POST', path: '/api/setup/save', handler: setupRoute.saveSetup },
   { method: 'POST', path: '/api/setup/lookup', handler: setupRoute.lookupRecord },
+  { method: 'POST', path: '/api/setup/resolve-id', handler: setupRoute.resolveId },
   { method: 'POST', path: '/api/analyze', handler: analyzeRoute.post },
   { method: 'POST', path: '/api/create', handler: createRoute.post },
   { method: 'GET',  path: '/api/calendar/status', handler: calendarRoute.status },
@@ -34,6 +36,10 @@ const ROUTES = [
   { method: 'GET',  path: '/api/cache/stats', handler: cacheRoute.stats },
   { method: 'POST', path: '/api/cache/clear', handler: cacheRoute.clear },
   { method: 'POST', path: '/api/cache/prune', handler: cacheRoute.prune },
+  // User overrides on draft plan rows
+  { method: 'POST', path: '/api/override',       handler: overridesRoute.set },
+  { method: 'POST', path: '/api/override/clear', handler: overridesRoute.clear },
+  { method: 'GET',  path: '/api/override/stats', handler: overridesRoute.stats },
 ];
 
 export function match(method, path) {

@@ -1,5 +1,5 @@
 import { query } from '../services/salesforce.js';
-import { save } from '../lib/config-store.js';
+import { save, addManualRelatedRecord } from '../lib/config-store.js';
 
 /**
  * POST /api/setup/resolve-user
@@ -43,6 +43,60 @@ export async function saveSetup({ body, sendJson, res }) {
   }
   const merged = save(body);
   return sendJson(res, 200, { ok: true, config: merged });
+}
+
+/**
+ * POST /api/setup/resolve-id
+ * Body: { idOrUrl }
+ * Accepts a Salesforce URL or a bare 15/18-char Id and returns { id, name, type }.
+ * Tries Opportunity → Account → Strategic_Initiative__c → Deal_Support_Request__c.
+ */
+export async function resolveId({ body, sendJson, res }) {
+  const input = (body?.idOrUrl || '').trim();
+  if (!input) return sendJson(res, 400, { error: 'idOrUrl required' });
+
+  // Extract a 15- or 18-char Salesforce ID from the input. Works for plain IDs,
+  // Lightning URLs, classic URLs, and most other Salesforce link shapes.
+  const match = input.match(/\b([a-zA-Z0-9]{15}|[a-zA-Z0-9]{18})\b/);
+  if (!match) {
+    return sendJson(res, 400, { error: 'Could not find a Salesforce ID in input. Paste a record URL or a 15/18-char ID.' });
+  }
+  const id = match[1];
+
+  // Validate it looks like a real SF id (mostly alphanumeric, no obvious garbage)
+  if (!/^[a-zA-Z0-9]+$/.test(id)) {
+    return sendJson(res, 400, { error: 'Invalid ID format' });
+  }
+
+  // Try the most common types in order. Each query returns 0 or 1 records.
+  // We use Id-based queries which are O(1) on Salesforce.
+  const candidates = [
+    { type: 'Opportunity',                soql: `SELECT Id, Name, IsClosed FROM Opportunity WHERE Id = '${id}' LIMIT 1` },
+    { type: 'Account',                    soql: `SELECT Id, Name FROM Account WHERE Id = '${id}' LIMIT 1` },
+    { type: 'Strategic_Initiative__c',    soql: `SELECT Id, Name FROM Strategic_Initiative__c WHERE Id = '${id}' LIMIT 1` },
+    { type: 'Deal_Support_Request__c',    soql: `SELECT Id, Name FROM Deal_Support_Request__c WHERE Id = '${id}' LIMIT 1` },
+  ];
+
+  for (const c of candidates) {
+    try {
+      const records = await query(c.soql);
+      if (records.length > 0) {
+        const r = records[0];
+        // Persist so this record appears in EVERY draft-plan dropdown going forward
+        try { addManualRelatedRecord({ id: r.Id, name: r.Name, type: c.type }); } catch {}
+        return sendJson(res, 200, {
+          id: r.Id,
+          name: r.Name,
+          type: c.type,
+          isClosed: r.IsClosed ?? null,
+        });
+      }
+    } catch {
+      // SObject might not be queryable for this user — skip silently
+    }
+  }
+
+  return sendJson(res, 404, { error: `No record found in org62 with ID ${id}. Make sure it's an Opportunity, Account, Strategic Initiative, or DSR.` });
 }
 
 /**

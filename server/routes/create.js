@@ -1,5 +1,6 @@
 import { load } from '../lib/config-store.js';
 import { createRecord, query } from '../services/salesforce.js';
+import * as overrides from '../services/overrides-store.js';
 
 const SE_RECORD_TYPE_ID = '01230000001GgBYAA0'; // Solutions Event
 
@@ -95,6 +96,9 @@ export async function post({ body, req, res }) {
 
       const eventId = await createRecord('Event', fields);
       eventsCreated.push({ id: eventId, eventId: item.eventId, subject: item.subject });
+      // Successful create → drop the user override for this event (no longer needed,
+      // and on next analyze the event will show as already-logged anyway).
+      try { overrides.clearOverride(item.eventId); } catch {}
       send('event-created', { sfEventId: eventId, eventId: item.eventId, subject: item.subject });
     } catch (e) {
       eventsFailed.push({ eventId: item.eventId, error: e.message, subject: item.subject });

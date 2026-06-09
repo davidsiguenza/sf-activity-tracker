@@ -20,6 +20,7 @@ const DEFAULT_CONFIG = {
   aliasTable: [],
   taxonomyCorrections: [],
   enabledCalendarIds: [], // empty = all visible. Otherwise, only fetch from these calendar IDs.
+  manualRelatedRecords: [], // {id, name, type, addedAt} — records the user pasted manually; persisted across sessions and shown in every dropdown.
   createdAt: null,
   updatedAt: null,
 };
@@ -74,6 +75,25 @@ export function addAlias(alias, matches) {
     aliasTable.push({ alias, matches });
   }
   return save({ aliasTable });
+}
+
+/**
+ * Add a manually-resolved record (Opportunity / Account / SI / DSR) so it
+ * appears in all Related-To dropdowns from now on. Idempotent on `id`.
+ * @param {{id, name, type}} record
+ */
+export function addManualRelatedRecord(record) {
+  const cfg = load() || DEFAULT_CONFIG;
+  const list = cfg.manualRelatedRecords || [];
+  if (list.some((r) => r.id === record.id)) return cfg; // already there
+  list.push({ id: record.id, name: record.name, type: record.type, addedAt: new Date().toISOString() });
+  return save({ manualRelatedRecords: list });
+}
+
+export function removeManualRelatedRecord(id) {
+  const cfg = load() || DEFAULT_CONFIG;
+  const list = (cfg.manualRelatedRecords || []).filter((r) => r.id !== id);
+  return save({ manualRelatedRecords: list });
 }
 
 /**

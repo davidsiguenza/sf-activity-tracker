@@ -816,11 +816,27 @@ function buildDraftRow(row) {
   tr.appendChild(buildRelatedToCell(row));
   tr.appendChild(buildConfidenceCell(cls.confidence));
   tr.appendChild(buildTaskTypeCell(row));
-  tr.appendChild(buildBoolCell(cls.isCF, (v) => { cls.isCF = v; }));
-  tr.appendChild(buildBoolCell(cls.isCR, (v) => { cls.isCR = v; }));
+  tr.appendChild(buildBoolCell(cls.isCF, (v) => { cls.isCF = v; saveOverride(row, { isCF: v }); }));
+  tr.appendChild(buildBoolCell(cls.isCR, (v) => { cls.isCR = v; saveOverride(row, { isCR: v }); }));
   tr.appendChild(buildStatusCell(cls));
 
   return tr;
+}
+
+// Sentinel value used by the select to trigger the "paste URL/ID" inline editor.
+const PASTE_OPTION_VALUE = '__paste__';
+
+/**
+ * Persist a user edit so it survives page reloads. Best-effort — failures
+ * don't block the UI (the local state still reflects the change).
+ */
+function saveOverride(row, fields) {
+  const hash = row.classification._hash;
+  if (!hash) return; // can't persist without hash (shouldn't happen post-analyze)
+  fetchJson('/api/override', {
+    method: 'POST',
+    body: { eventId: row.event.id, hash, fields },
+  }).catch((e) => console.warn('saveOverride failed', e));
 }
 
 function buildRelatedToCell(row) {
@@ -828,32 +844,225 @@ function buildRelatedToCell(row) {
   if (cls.status === 'already-logged') return td(em('logged'));
   if (cls.status === 'excluded' || cls.status === 'skip') return td(em('—'));
 
+  const cell = document.createElement('td');
+  cell.appendChild(buildRelatedToSelect(row, cell));
+  return cell;
+}
+
+/**
+ * Build the dropdown widget. Layout:
+ *   ✎ Paste URL or ID…              ← always at top so no scrolling needed
+ *   — none —
+ *   ▸ ✎ Manually added (config.manualRelatedRecords + LLM-picked extra)
+ *   ▸ 📌 Opportunities (from DCs, excluding long-closed >30d)
+ *   ▸ 🏢 Accounts (distinct from DC list)
+ *
+ * When user picks "Paste URL or ID…" the cell is replaced with a text input
+ * that resolves the URL/ID against org62.
+ */
+function buildRelatedToSelect(row, cellEl) {
+  const cls = row.classification;
   const select = document.createElement('select');
+
+  // 1. PASTE option at top — user wanted this so they don't have to scroll
+  const pasteOpt = document.createElement('option');
+  pasteOpt.value = PASTE_OPTION_VALUE;
+  pasteOpt.textContent = '✎ Paste URL or ID…';
+  select.appendChild(pasteOpt);
+
+  // 2. Empty option
   const empty = document.createElement('option');
   empty.value = '';
   empty.textContent = '— none —';
+  if (!cls.relatedTo) empty.selected = true;
   select.appendChild(empty);
 
-  for (const dc of state.dcOpportunities) {
-    const opt = document.createElement('option');
-    opt.value = JSON.stringify({ id: dc.opportunityId, name: dc.opportunityName, type: 'Opportunity' });
-    opt.textContent = `${dc.opportunityName} (${dc.accountName})`;
-    if (cls.relatedTo?.id === dc.opportunityId) opt.selected = true;
-    select.appendChild(opt);
+  // Track whether we found the current selection in any group, so we know
+  // whether to add an extra "LLM-picked" entry as fallback at the end.
+  let selectionFound = false;
+  const currentId = cls.relatedTo?.id;
+  const todayMs = Date.now();
+
+  // 3. Manually added group (persisted across sessions)
+  const manual = state.config?.manualRelatedRecords || [];
+  if (manual.length > 0) {
+    const grp = document.createElement('optgroup');
+    grp.label = '✎ Manually added';
+    for (const r of manual) {
+      const opt = document.createElement('option');
+      opt.value = JSON.stringify({ id: r.id, name: r.name, type: r.type });
+      opt.textContent = `${r.name} (${r.type})`;
+      if (r.id === currentId) { opt.selected = true; selectionFound = true; }
+      grp.appendChild(opt);
+    }
+    select.appendChild(grp);
   }
 
-  if (cls.relatedTo && !state.dcOpportunities.find((d) => d.opportunityId === cls.relatedTo.id)) {
+  // 4. Opportunities from DCs — split active-vs-recently-closed for visual cue
+  const oppsActive = state.dcOpportunities.filter((d) => !d.opportunityIsClosed);
+  const oppsRecentClosed = state.dcOpportunities.filter((d) => d.opportunityIsClosed);
+
+  if (oppsActive.length > 0 || oppsRecentClosed.length > 0) {
+    const grp = document.createElement('optgroup');
+    grp.label = '📌 Opportunities';
+    for (const dc of oppsActive) {
+      const opt = document.createElement('option');
+      opt.value = JSON.stringify({ id: dc.opportunityId, name: dc.opportunityName, type: 'Opportunity' });
+      opt.textContent = `${dc.opportunityName} — ${dc.accountName}`;
+      if (dc.opportunityId === currentId) { opt.selected = true; selectionFound = true; }
+      grp.appendChild(opt);
+    }
+    for (const dc of oppsRecentClosed) {
+      const days = dc.opportunityCloseDate
+        ? Math.max(0, Math.floor((todayMs - new Date(dc.opportunityCloseDate).getTime()) / (24 * 60 * 60 * 1000)))
+        : null;
+      const opt = document.createElement('option');
+      opt.value = JSON.stringify({ id: dc.opportunityId, name: dc.opportunityName, type: 'Opportunity' });
+      opt.textContent = `${dc.opportunityName} — ${dc.accountName}` + (days !== null ? `  ⊘ closed ${days}d ago` : '  ⊘ closed');
+      if (dc.opportunityId === currentId) { opt.selected = true; selectionFound = true; }
+      grp.appendChild(opt);
+    }
+    select.appendChild(grp);
+  }
+
+  // 5. Accounts — distinct accounts derived from DC list
+  const accountsSeen = new Set();
+  const accounts = [];
+  for (const dc of state.dcOpportunities) {
+    if (!dc.accountId || accountsSeen.has(dc.accountId)) continue;
+    accountsSeen.add(dc.accountId);
+    accounts.push({ id: dc.accountId, name: dc.accountName });
+  }
+  accounts.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  if (accounts.length > 0) {
+    const grp = document.createElement('optgroup');
+    grp.label = '🏢 Accounts (from your DCs)';
+    for (const a of accounts) {
+      const opt = document.createElement('option');
+      opt.value = JSON.stringify({ id: a.id, name: a.name, type: 'Account' });
+      opt.textContent = a.name;
+      if (a.id === currentId) { opt.selected = true; selectionFound = true; }
+      grp.appendChild(opt);
+    }
+    select.appendChild(grp);
+  }
+
+  // 6. Fallback — if the current selection wasn't in any group, add it explicitly
+  // (e.g. an LLM-picked Opportunity that's now filtered out as long-closed)
+  if (cls.relatedTo && !selectionFound) {
+    const grp = document.createElement('optgroup');
+    grp.label = '⚙ Current selection (not in lists above)';
     const opt = document.createElement('option');
     opt.value = JSON.stringify(cls.relatedTo);
     opt.textContent = `${cls.relatedTo.name} (${cls.relatedTo.type})`;
     opt.selected = true;
-    select.appendChild(opt);
+    grp.appendChild(opt);
+    select.appendChild(grp);
   }
 
   select.addEventListener('change', () => {
+    if (select.value === PASTE_OPTION_VALUE) {
+      // Sentinel — don't take it as a real value. Swap the cell to text input.
+      // Restore the visual selection back to whatever was there before this click.
+      restoreSelectToCurrent(select, cls.relatedTo);
+      swapToPasteInput(row, cellEl);
+      return;
+    }
     cls.relatedTo = select.value ? JSON.parse(select.value) : null;
+    saveOverride(row, { relatedTo: cls.relatedTo });
   });
-  return td(select);
+
+  return select;
+}
+
+/** Reset the select's visual state to match cls.relatedTo (used after the paste sentinel). */
+function restoreSelectToCurrent(select, relatedTo) {
+  const targetId = relatedTo?.id;
+  // Walk every option (including those inside optgroups)
+  for (const opt of select.querySelectorAll('option')) {
+    if (!targetId && opt.value === '') { opt.selected = true; return; }
+    if (targetId) {
+      try {
+        const v = opt.value && opt.value !== PASTE_OPTION_VALUE ? JSON.parse(opt.value) : null;
+        if (v?.id === targetId) { opt.selected = true; return; }
+      } catch {}
+    }
+  }
+  // Fall back to the empty option
+  select.selectedIndex = 1;
+}
+
+/**
+ * Replace the select widget with a text input. User pastes a URL or ID, presses
+ * Enter or blurs → backend resolves it → cell goes back to a select with the new
+ * record selected.
+ */
+function swapToPasteInput(row, cellEl) {
+  cellEl.replaceChildren();
+
+  const wrapper = document.createElement('div');
+  wrapper.style.display = 'flex';
+  wrapper.style.flexDirection = 'column';
+  wrapper.style.gap = '3px';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = 'Paste Salesforce URL or 15/18-char ID';
+  input.style.fontSize = '12px';
+  wrapper.appendChild(input);
+
+  const status = document.createElement('span');
+  status.style.fontSize = '11px';
+  status.style.color = 'var(--muted)';
+  wrapper.appendChild(status);
+
+  cellEl.appendChild(wrapper);
+
+  let resolving = false;
+  const resolve = async () => {
+    const value = input.value.trim();
+    if (!value || resolving) return;
+    resolving = true;
+    status.style.color = 'var(--muted)';
+    status.textContent = 'Looking up in org62…';
+    try {
+      const r = await fetchJson('/api/setup/resolve-id', {
+        method: 'POST',
+        body: { idOrUrl: value },
+      });
+      // Set the row's relatedTo, persist as override, rebuild the cell as a select
+      row.classification.relatedTo = { id: r.id, name: r.name, type: r.type };
+      saveOverride(row, { relatedTo: row.classification.relatedTo });
+      // Refresh local config so the new record shows under "Manually added" in
+      // every dropdown going forward (without needing a page reload)
+      try {
+        const cfgResp = await fetchJson('/api/config');
+        if (cfgResp?.config) state.config = cfgResp.config;
+      } catch {}
+      cellEl.replaceChildren(buildRelatedToSelect(row, cellEl));
+    } catch (e) {
+      status.style.color = '#cf222e';
+      status.textContent = `✗ ${e.message}`;
+      resolving = false;
+    }
+  };
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); resolve(); }
+    if (e.key === 'Escape') {
+      // Cancel — rebuild cell with the original select
+      cellEl.replaceChildren(buildRelatedToSelect(row, cellEl));
+    }
+  });
+  input.addEventListener('blur', () => {
+    // Small delay so Escape's rebuild can win the race
+    setTimeout(() => {
+      if (input.isConnected && input.value.trim()) resolve();
+    }, 100);
+  });
+
+  // Auto-focus so the user can paste immediately
+  setTimeout(() => input.focus(), 0);
 }
 
 function buildConfidenceCell(c) {
@@ -879,7 +1088,10 @@ function buildTaskTypeCell(row) {
     if (cls.seTaskType === t) opt.selected = true;
     select.appendChild(opt);
   }
-  select.addEventListener('change', () => { cls.seTaskType = select.value; });
+  select.addEventListener('change', () => {
+    cls.seTaskType = select.value;
+    saveOverride(row, { seTaskType: cls.seTaskType });
+  });
   return td(select);
 }
 
