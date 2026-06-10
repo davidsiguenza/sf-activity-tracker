@@ -72,16 +72,104 @@ export async function fetchAlreadyLogged(seUserId, fromIso, toIso) {
   return records;
 }
 
+// All-day events ("Home", "Madrid (Office)", "Holidays in Spain") are calendar
+// overlays that mark presence/context, NOT real meetings. Never tracked.
+function isAllDayEvent(ev) {
+  if (ev.isAllDay) return true; // explicit flag from Google API normalizer
+  // Heuristic for the claude-fallback path: midnight start + midnight end with no TZ
+  return /T00:00:00$/.test(ev.start || '') && /T00:00:00$/.test(ev.end || '');
+}
+
+// ─── Dedup matching helpers ──────────────────────────────────────────────────
+
 /**
- * Build a key for de-dupe matching between Calendar event and SF Event record.
- * Uses subject + start datetime rounded to the minute.
+ * Subject similarity in [0, 1].
+ *   1.0 = identical (case/space insensitive)
+ *   0.9 = one is a substring of the other
+ *   ~0.7-0.95 = small typos / extra words (Levenshtein-based)
+ *   <0.5 = clearly different topics
  */
-function dedupeKey(subject, startIso) {
-  const subj = (subject || '').trim().toLowerCase();
-  const dt = new Date(startIso);
-  // Round to minute, ignore seconds
-  dt.setSeconds(0, 0);
-  return `${subj}|${dt.toISOString()}`;
+function subjectSimilarity(a, b) {
+  const norm = (s) => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const aN = norm(a);
+  const bN = norm(b);
+  if (!aN || !bN) return 0;
+  if (aN === bN) return 1.0;
+  if (aN.length >= 4 && bN.length >= 4 && (aN.includes(bN) || bN.includes(aN))) return 0.9;
+  const dist = levenshtein(aN, bN);
+  const maxLen = Math.max(aN.length, bN.length);
+  return Math.max(0, 1 - dist / maxLen);
+}
+
+/** Standard iterative Levenshtein distance. O(m*n) memory but fine for short subjects. */
+function levenshtein(a, b) {
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  const m = [];
+  for (let i = 0; i <= b.length; i++) m[i] = [i];
+  for (let j = 0; j <= a.length; j++) m[0][j] = j;
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      m[i][j] = b.charAt(i - 1) === a.charAt(j - 1)
+        ? m[i - 1][j - 1]
+        : Math.min(m[i - 1][j - 1], m[i][j - 1], m[i - 1][j]) + 1;
+    }
+  }
+  return m[b.length][a.length];
+}
+
+/**
+ * Time overlap as a fraction of the SHORTER duration (so a 30-min event
+ * fully inside a 2-hour event scores 1.0). Returns 0..1.
+ */
+function timeOverlapRatio(aStart, aEnd, bStart, bEnd) {
+  const aS = new Date(aStart).getTime();
+  const aE = new Date(aEnd).getTime();
+  const bS = new Date(bStart).getTime();
+  const bE = new Date(bEnd).getTime();
+  if (!Number.isFinite(aS) || !Number.isFinite(aE) || !Number.isFinite(bS) || !Number.isFinite(bE)) return 0;
+  const overlap = Math.max(0, Math.min(aE, bE) - Math.max(aS, bS));
+  if (overlap === 0) return 0;
+  const minDur = Math.max(1, Math.min(aE - aS, bE - bS));
+  return Math.min(1, overlap / minDur);
+}
+
+function sameMinute(a, b) {
+  return Math.floor(new Date(a).getTime() / 60000) === Math.floor(new Date(b).getTime() / 60000);
+}
+
+/**
+ * Decide whether a calendar event matches an existing SF Event, and at what tier.
+ * Returns null (no match), or { type, confidence } where:
+ *   - 'exact': same subject + same minute → definitely the same activity
+ *   - 'probably-logged': similar subject AND time overlaps ≥50% → very likely a duplicate
+ *   - 'time-conflict': overlaps ≥50% but subjects differ → not a dupe, just a heads-up
+ */
+// Calendar overlay events (Home, Madrid Office, Holidays-in-Spain) are 24h
+// blocks that would otherwise hijack every dedup match. Skip the time-conflict
+// tier for events longer than this threshold — they're overlays, not meetings.
+const OVERLAY_DURATION_THRESHOLD_MS = 12 * 60 * 60 * 1000;
+
+function classifyDedupeMatch(calEvent, sfEvent) {
+  const subjScore = subjectSimilarity(calEvent.summary, sfEvent.Subject);
+  const overlap = timeOverlapRatio(
+    calEvent.start, calEvent.end,
+    sfEvent.StartDateTime, sfEvent.EndDateTime
+  );
+
+  if (subjScore >= 0.95 && sameMinute(calEvent.start, sfEvent.StartDateTime)) {
+    return { type: 'exact', confidence: 1.0, subjScore, overlap };
+  }
+  if (overlap >= 0.5 && subjScore >= 0.7) {
+    return { type: 'probably-logged', confidence: subjScore * overlap, subjScore, overlap };
+  }
+  if (overlap >= 0.5) {
+    // Skip multi-day / all-day overlays — they trivially "overlap" with anything
+    const calDurMs = new Date(calEvent.end).getTime() - new Date(calEvent.start).getTime();
+    if (Number.isFinite(calDurMs) && calDurMs > OVERLAY_DURATION_THRESHOLD_MS) return null;
+    return { type: 'time-conflict', confidence: overlap, subjScore, overlap };
+  }
+  return null;
 }
 
 /**
@@ -136,34 +224,81 @@ export async function analyze({ fromIso, toIso, config, forceRefresh = false, fo
     errors.push({ stage: 'salesforce', message: e.message });
   }
 
-  // 4) Build a de-dupe lookup: key → SF Event Id
-  const loggedMap = new Map();
-  for (const r of alreadyLogged) {
-    loggedMap.set(dedupeKey(r.Subject, r.StartDateTime), r.Id);
+  // 4) Three-tier dedup: for each calendar event find the best matching SF Event.
+  //    Process tier-by-tier (exact → probably-logged → time-conflict) so a
+  //    weaker tier never steals an SF Event from a stronger-tier candidate.
+  //    Within a tier, greedy by confidence.
+  const calMatches = new Map();
+  const sfMatched = new Set();
+
+  const candidates = [];
+  for (const cal of filtered) {
+    for (const sfEv of alreadyLogged) {
+      const m = classifyDedupeMatch(cal, sfEv);
+      if (m) candidates.push({ calId: cal.id, sfEv, ...m });
+    }
   }
 
-  // 5) For each calendar event, attach already-logged status
+  for (const tier of ['exact', 'probably-logged', 'time-conflict']) {
+    const tierCands = candidates
+      .filter((c) => c.type === tier)
+      .sort((a, b) => b.confidence - a.confidence);
+    for (const c of tierCands) {
+      if (calMatches.has(c.calId)) continue;
+      if (sfMatched.has(c.sfEv.Id)) continue;
+      calMatches.set(c.calId, c);
+      sfMatched.add(c.sfEv.Id);
+    }
+  }
+
+  // 5) Enrich events with their best match info
   const enrichedEvents = filtered.map((e) => {
-    const key = dedupeKey(e.summary, e.start);
-    const sfEventId = loggedMap.get(key);
+    const m = calMatches.get(e.id);
     return {
       ...e,
-      alreadyLoggedSfId: sfEventId || null,
+      alreadyLoggedSfId: m?.type === 'exact' ? m.sfEv.Id : null,
+      dedupeMatch: m
+        ? {
+            type: m.type,
+            sfId: m.sfEv.Id,
+            sfSubject: m.sfEv.Subject,
+            sfStart: m.sfEv.StartDateTime,
+            sfEnd: m.sfEv.EndDateTime,
+            sfTaskType: m.sfEv.SE_Task_Type__c || null,
+            confidence: Math.round(m.confidence * 100) / 100,
+          }
+        : null,
     };
   });
 
-  // 6) Split into "needs classification" vs "already logged"
-  const needsClassification = enrichedEvents.filter((e) => !e.alreadyLoggedSfId);
+  // SF events that DIDN'T match any calendar event — render as ghost blocks
+  const unmatchedSfEvents = alreadyLogged
+    .filter((s) => !sfMatched.has(s.Id))
+    .map((s) => ({
+      id: s.Id,
+      subject: s.Subject || '(no subject)',
+      start: s.StartDateTime,
+      end: s.EndDateTime,
+      whatId: s.WhatId || null,
+      seTaskType: s.SE_Task_Type__c || null,
+    }));
+
+  // 6) Split into "needs classification" vs "already logged" or all-day overlay.
+  //    All-day events are pure visual context (Home, Office days, Holidays)
+  //    and are never activity-tracked, so they bypass classification and dedup.
+  const needsClassification = enrichedEvents.filter((e) => !e.alreadyLoggedSfId && !isAllDayEvent(e));
 
   // 7) If nothing needs classification, short-circuit
   if (needsClassification.length === 0) {
     return {
       events: enrichedEvents,
       dcOpportunities,
+      unmatchedSfEvents,
       classifications: enrichedEvents.map((e) => ({
         eventId: e.id,
         status: 'already-logged',
         salesforceEventId: e.alreadyLoggedSfId,
+        _dedupeMatch: e.dedupeMatch,
       })),
       errors,
       calendarMeta,
@@ -277,7 +412,8 @@ export async function analyze({ fromIso, toIso, config, forceRefresh = false, fo
     errors.push({ stage: 'classify', message: e.message });
   }
 
-  // 10) Merge with already-logged events
+  // 10) Merge with already-logged events. Attach dedupeMatch info to every row
+  //     so the UI can render banners for probably-logged / time-conflict cases.
   const allClassifications = enrichedEvents.map((e) => {
     if (e.alreadyLoggedSfId) {
       return {
@@ -290,10 +426,29 @@ export async function analyze({ fromIso, toIso, config, forceRefresh = false, fo
         isCR: false,
         confidence: 'high',
         reasoning: 'Already exists as an Event in org62',
+        _dedupeMatch: e.dedupeMatch,
+      };
+    }
+    if (isAllDayEvent(e)) {
+      return {
+        eventId: e.id,
+        status: 'excluded',
+        relatedTo: null,
+        seTaskType: null,
+        isCF: false,
+        isCR: false,
+        confidence: 'high',
+        reasoning: 'All-day event (calendar overlay) — never tracked',
       };
     }
     const found = classifications.find((c) => c.eventId === e.id);
-    if (found) return found;
+    if (found) {
+      // Tag probably-logged / time-conflict so the UI can show a banner
+      if (e.dedupeMatch && e.dedupeMatch.type !== 'exact') {
+        found._dedupeMatch = e.dedupeMatch;
+      }
+      return found;
+    }
     return {
       eventId: e.id,
       status: 'flagged',
@@ -303,6 +458,7 @@ export async function analyze({ fromIso, toIso, config, forceRefresh = false, fo
       isCR: false,
       confidence: 'low',
       reasoning: 'Classifier did not return a result for this event',
+      _dedupeMatch: e.dedupeMatch,
     };
   });
 
@@ -346,6 +502,7 @@ export async function analyze({ fromIso, toIso, config, forceRefresh = false, fo
   return {
     events: enrichedEvents,
     dcOpportunities,
+    unmatchedSfEvents,
     classifications: allClassifications,
     errors,
     calendarMeta,

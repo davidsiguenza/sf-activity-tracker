@@ -269,12 +269,63 @@ textarea { font-family: inherit; }
   color: #6e7781 !important;
 }
 
-/* SELECTED — strong purple ring, applied OVER any state class */
+/* PROBABLY-LOGGED — same activity at this time per fuzzy match. Orange dashed
+ * to clearly differ from the blue dashed of "identified" and the gray of "logged". */
+.fc-event.event-probably-logged {
+  background: #ffe4b5 !important;
+  border: 2px dashed #d97706 !important;
+}
+.fc-event.event-probably-logged .fc-event-title,
+.fc-event.event-probably-logged .fc-event-time {
+  color: #5c3a00 !important;
+}
+
+/* TIME-CONFLICT — small yellow corner cue without overriding the status colors */
+.fc-event.event-time-conflict {
+  position: relative;
+}
+.fc-event.event-time-conflict::after {
+  content: '⏰';
+  position: absolute;
+  top: 1px; right: 3px;
+  font-size: 10px;
+  pointer-events: none;
+}
+
+/* SF-ONLY ghost — events logged in org62 with no matching calendar entry.
+ * Striped gray, semi-transparent; clearly visual-only, not interactive material. */
+.fc-event.event-sf-ghost {
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(208, 215, 222, 0.85),
+    rgba(208, 215, 222, 0.85) 6px,
+    rgba(175, 184, 193, 0.85) 6px,
+    rgba(175, 184, 193, 0.85) 12px
+  ) !important;
+  border: 1px dashed #6e7781 !important;
+  opacity: 0.85;
+}
+.fc-event.event-sf-ghost .fc-event-title,
+.fc-event.event-sf-ghost .fc-event-time {
+  color: #57606a !important;
+  font-style: italic;
+}
+
+/* SELECTED — purple ring (clicked-as-focus from a TABLE row click). Uses
+ * box-shadow so it can co-exist with the green outline below. */
 .fc-event.event-selected,
 .fc-event.event-selected:hover {
-  outline: 3px solid #8250df !important;
-  outline-offset: 1px;
+  box-shadow: 0 0 0 3px #8250df, inset 5px 0 0 var(--gcolor, transparent) !important;
   z-index: 10;
+}
+
+/* MARKED FOR CREATE — green inset outline. Click on a calendar event toggles
+ * this state (= ticking the row's checkbox). Outline-offset negative so it
+ * lives INSIDE the event border and never visually fights with anything. */
+.fc-event.event-marked-create {
+  outline: 3px solid #2da44e !important;
+  outline-offset: -3px;
+  font-weight: 700 !important;
 }
 
 /* Don't paint the FC "today" column so strongly — it competes with our event yellows */
@@ -335,6 +386,26 @@ textarea { font-family: inherit; }
   background: #ffebe9;
   color: #82071e;
   border-color: #ff8182;
+}
+
+.dedupe-banner {
+  margin-top: 4px;
+  padding: 3px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  cursor: help;
+  border: 1px solid var(--border);
+  background: #f6f8fa;
+}
+.dedupe-banner-probably {
+  background: #ffe4b5;
+  color: #5c3a00;
+  border-color: #d97706;
+}
+.dedupe-banner-conflict {
+  background: #fff5d8;
+  color: #7d4e00;
+  border-color: #e6b800;
 }
 
 #progress-log { list-style: none; padding: 0; margin: 0; max-height: 240px; overflow: auto; }

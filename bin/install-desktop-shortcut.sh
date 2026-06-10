@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Copy "SF Activity Tracker.command" to your Desktop so you can double-click
-# it like any other launcher.
+# Copy the .command launchers to your Desktop so you can double-click them
+# like any other launcher.
 #
 # Defaults to a hard copy (so it survives moving the project folder) but
 # pass --symlink if you'd rather have it follow updates from the project.
@@ -8,29 +8,45 @@
 set -e
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SOURCE="$PROJECT_ROOT/bin/SF Activity Tracker.command"
-DESTINATION="$HOME/Desktop/SF Activity Tracker.command"
 
-if [ ! -f "$SOURCE" ]; then
-  echo "✗ $SOURCE not found"
-  exit 1
-fi
+LAUNCHERS=(
+  "SF Activity Tracker.command"
+  "Restart SF Activity Tracker.command"
+)
 
-# Make sure source is executable (git might have lost the bit on clone)
-chmod +x "$SOURCE"
+USE_SYMLINK=0
+if [ "$1" = "--symlink" ]; then USE_SYMLINK=1; fi
 
-if [ "$1" = "--symlink" ]; then
-  if [ -e "$DESTINATION" ] || [ -L "$DESTINATION" ]; then rm "$DESTINATION"; fi
-  ln -s "$SOURCE" "$DESTINATION"
-  echo "✓ Symlinked $DESTINATION → $SOURCE"
-  echo "  (changes in the project will be picked up automatically)"
-else
-  cp "$SOURCE" "$DESTINATION"
-  chmod +x "$DESTINATION"
-  echo "✓ Copied $SOURCE → $DESTINATION"
-  echo "  Re-run this script after a git pull to update the desktop copy."
-fi
+for name in "${LAUNCHERS[@]}"; do
+  source="$PROJECT_ROOT/bin/$name"
+  dest="$HOME/Desktop/$name"
+
+  if [ ! -f "$source" ]; then
+    echo "✗ $source not found, skipping"
+    continue
+  fi
+
+  chmod +x "$source"
+
+  if [ -e "$dest" ] || [ -L "$dest" ]; then
+    rm "$dest"
+  fi
+
+  if [ "$USE_SYMLINK" = "1" ]; then
+    ln -s "$source" "$dest"
+    echo "✓ Symlinked $name → $source"
+  else
+    cp "$source" "$dest"
+    chmod +x "$dest"
+    echo "✓ Copied $name to Desktop"
+  fi
+done
 
 echo
-echo "Double-click 'SF Activity Tracker' on your Desktop to launch the app."
-echo "It will start the server if needed and open your browser at http://127.0.0.1:7825"
+echo "On your Desktop:"
+echo "  • SF Activity Tracker         → starts (if needed) + opens the app"
+echo "  • Restart SF Activity Tracker → bounces the server (after backend changes)"
+if [ "$USE_SYMLINK" = "0" ]; then
+  echo
+  echo "Re-run this script after a git pull to refresh the desktop copies."
+fi

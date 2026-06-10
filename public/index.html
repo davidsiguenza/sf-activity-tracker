@@ -200,10 +200,15 @@ Wellness</textarea>
       </section>
       <section>
         <h3>7 · Acceso rápido desde el escritorio</h3>
-        <p>Si quieres un icono en el escritorio para abrir la app de un click:</p>
+        <p>Instala los dos atajos del escritorio:</p>
         <pre style="user-select: all;">cd ~/Documents/Salesforce/tools/sf-activity-tracker
 ./bin/install-desktop-shortcut.sh</pre>
-        <p class="hint">A partir de ahí: doble-click en <b>"SF Activity Tracker"</b> de tu Desktop. Comprueba si el server está corriendo, lo arranca si hace falta, y abre tu browser en <code>http://127.0.0.1:7825</code>. Pasa <code>--symlink</code> si prefieres que el icono siga actualizándose con la última versión del repo.</p>
+        <p class="hint">Aparecen dos iconos en tu Desktop:</p>
+        <ul>
+          <li><b>SF Activity Tracker</b> — comprueba si el server corre, lo arranca si hace falta, abre el browser en <code>http://127.0.0.1:7825</code>.</li>
+          <li><b>Restart SF Activity Tracker</b> — fuerza un bounce del server. Útil tras cambios al código del backend o si se queda colgado.</li>
+        </ul>
+        <p class="hint">Pasa <code>--symlink</code> si prefieres que los iconos sigan actualizándose con <code>git pull</code>. Si no, re-corre el script tras cada pull para refrescar las copias.</p>
       </section>
 
       <section>

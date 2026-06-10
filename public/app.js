@@ -30,6 +30,7 @@ const state = {
   events: [],
   classifications: [],
   dcOpportunities: [],
+  unmatchedSfEvents: [],
   draftRows: new Map(),
   showLogged: loadShowLogged(),
   selectedEventId: null,
@@ -228,6 +229,11 @@ function showApp() {
       if (['already-logged', 'excluded', 'skip'].includes(cls.status)) continue;
       if (row._visible === false) continue; // skip filtered-out rows
       row.selected = e.target.checked;
+      // Sync green-ring on calendar
+      if (state.calendar) {
+        const fcEv = state.calendar.getEventById(row.event.id);
+        if (fcEv) fcEv.setExtendedProp('_markTick', Date.now());
+      }
     }
     renderDraftPlan({ keepSelectAllState: true });
   });
@@ -308,6 +314,8 @@ function initCalendar() {
     eventClassNames(arg) {
       const classes = [...(arg.event.extendedProps.classes || [])];
       if (state.selectedEventId === arg.event.id) classes.push('event-selected');
+      const row = state.draftRows.get(arg.event.id);
+      if (row?.selected) classes.push('event-marked-create');
       return classes;
     },
     eventDidMount(info) {
@@ -322,7 +330,19 @@ function initCalendar() {
     },
     eventClick(info) {
       info.jsEvent.preventDefault();
-      selectEvent(info.event.id, { scrollToRow: true });
+      // Skip ghost SF-only events (no draft row to toggle)
+      if (info.event.extendedProps?.isSfOnly) return;
+      // Click in the calendar = toggle the row's "create in org62" checkbox.
+      // We programmatically click the table checkbox so its existing change
+      // handler runs (updates row.selected, refreshes button, etc.).
+      const cb = document.querySelector(
+        `#draft-plan-table tbody tr[data-event-id="${CSS.escape(info.event.id)}"] input[type="checkbox"]`
+      );
+      if (!cb || cb.disabled) return; // already-logged / excluded / skip
+      cb.click();
+      // Force the calendar event's classes to re-evaluate so the green ring
+      // appears/disappears in sync.
+      info.event.setExtendedProp('_markTick', Date.now());
     },
   });
   state.calendar.render();
@@ -411,6 +431,7 @@ async function runAnalyze() {
     state.events = result.events || [];
     state.classifications = result.classifications || [];
     state.dcOpportunities = result.dcOpportunities || [];
+    state.unmatchedSfEvents = result.unmatchedSfEvents || [];
     renderResults(result);
     // Remember the last successfully-analyzed range so we can auto-restore on next page load
     saveLastRange(fromDate, toDate);
@@ -494,19 +515,42 @@ function renderResults(result) {
     const googleColor = ev.colorId && GOOGLE_COLORS[ev.colorId]
       ? GOOGLE_COLORS[ev.colorId].hex
       : null;
-    // Map status to CSS class. The "already-logged" status uses the same visual
-    // as a freshly-logged event (gray + strikethrough), so collapse to event-logged.
-    const cssClass = status === 'already-logged' ? 'event-logged' : `event-${status}`;
+    // Map status → CSS class. Dedupe-match overrides status visually so the
+    // user sees the duplicate-detection signal immediately on the calendar.
+    let cssClass;
+    if (status === 'already-logged') cssClass = 'event-logged';
+    else if (cls?._dedupeMatch?.type === 'probably-logged') cssClass = 'event-probably-logged';
+    else cssClass = `event-${status}`;
+
+    const classes = [cssClass];
+    if (cls?._dedupeMatch?.type === 'time-conflict') classes.push('event-time-conflict');
+
     state.calendar.addEvent({
       id: ev.id,
       title: ev.summary,
       start: ev.start,
       end: ev.end,
       extendedProps: {
-        classes: [cssClass],
+        classes,
         classification: cls,
         raw: ev,
         googleColor,
+      },
+    });
+  }
+
+  // Render SF Events that DIDN'T match any calendar event as ghost blocks.
+  // These were logged from outside this app (Activity Editor, Slack skill, etc.).
+  for (const sf of state.unmatchedSfEvents || []) {
+    state.calendar.addEvent({
+      id: 'sf-' + sf.id,
+      title: '📋 ' + sf.subject,
+      start: sf.start,
+      end: sf.end,
+      extendedProps: {
+        classes: ['event-sf-ghost'],
+        sfData: sf,
+        isSfOnly: true,
       },
     });
   }
@@ -542,6 +586,11 @@ function applyAllFilters() {
   // Calendar — set display per event
   if (state.calendar) {
     for (const fcEvent of state.calendar.getEvents()) {
+      // SF-only ghost events: hide together with the "show already logged" toggle
+      if (fcEvent.extendedProps?.isSfOnly) {
+        fcEvent.setProp('display', state.showLogged ? 'auto' : 'none');
+        continue;
+      }
       const row = state.draftRows.get(fcEvent.id);
       const visible = row ? row._visible : true;
       fcEvent.setProp('display', visible ? 'auto' : 'none');
@@ -807,7 +856,15 @@ function buildDraftRow(row) {
   cb.type = 'checkbox';
   cb.checked = row.selected;
   cb.disabled = ['already-logged', 'excluded', 'skip'].includes(cls.status);
-  cb.addEventListener('change', () => { row.selected = cb.checked; refreshCreateBtn(); });
+  cb.addEventListener('change', () => {
+    row.selected = cb.checked;
+    refreshCreateBtn();
+    // Sync the green-ring state on the calendar event
+    if (state.calendar) {
+      const fcEv = state.calendar.getEventById(row.event.id);
+      if (fcEv) fcEv.setExtendedProp('_markTick', Date.now());
+    }
+  });
   tr.appendChild(td(cb));
 
   tr.appendChild(td(text(row.event.summary)));
@@ -1128,7 +1185,31 @@ function buildStatusCell(cls) {
       : 'ℹ Opp closed status on event date unverifiable';
     cell.appendChild(warn);
   }
+
+  // Dedup match warning — orange for probably-logged, yellow for time-conflict
+  if (cls._dedupeMatch && cls._dedupeMatch.type !== 'exact') {
+    const m = cls._dedupeMatch;
+    const banner = document.createElement('div');
+    banner.className = 'dedupe-banner';
+    banner.classList.toggle('dedupe-banner-probably', m.type === 'probably-logged');
+    banner.classList.toggle('dedupe-banner-conflict', m.type === 'time-conflict');
+    const range = formatTimeRange(m.sfStart, m.sfEnd);
+    banner.title = m.sfSubject;
+    banner.textContent = m.type === 'probably-logged'
+      ? `📋 Probably logged: "${truncate(m.sfSubject, 40)}" ${range}`
+      : `⏰ Time clash: "${truncate(m.sfSubject, 40)}" ${range}`;
+    cell.appendChild(banner);
+  }
   return cell;
+}
+
+function formatTimeRange(startIso, endIso) {
+  const t = (d) => new Date(d).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+  return `${t(startIso)}–${t(endIso)}`;
+}
+
+function truncate(s, n) {
+  return (s || '').length > n ? (s || '').slice(0, n - 1) + '…' : (s || '');
 }
 
 function refreshCreateBtn() {

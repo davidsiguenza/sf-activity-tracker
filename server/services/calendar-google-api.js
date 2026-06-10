@@ -355,6 +355,9 @@ export async function fetchEvents(fromIso, toIso, userEmail, opts = {}) {
 function normalizeEvent(ev, userEmail, cal) {
   const start = ev.start?.dateTime || (ev.start?.date ? `${ev.start.date}T00:00:00` : '');
   const end = ev.end?.dateTime || (ev.end?.date ? `${ev.end.date}T00:00:00` : '');
+  // Google distinguishes all-day events by giving `start.date` instead of `start.dateTime`.
+  // We propagate this so the matcher can skip them from classification + dedup.
+  const isAllDay = !ev.start?.dateTime && !!ev.start?.date;
   let durationHours = 0;
   if (start && end) {
     const ms = new Date(end).getTime() - new Date(start).getTime();
@@ -383,6 +386,7 @@ function normalizeEvent(ev, userEmail, cal) {
     start,
     end,
     durationHours,
+    isAllDay,
     description: ev.description || '',
     location: ev.location || '',
     organizer: ev.organizer?.email || '',
