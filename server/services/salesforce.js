@@ -136,6 +136,21 @@ function formatValue(v) {
 }
 
 /**
+ * Resolve and cache the org's instance URL via `sf org display`.
+ * Used by the frontend to build "Open in Salesforce" record links.
+ * @returns {Promise<string>} e.g. https://gus.lightning.force.com
+ */
+let _instanceUrlCache = null;
+export async function getInstanceUrl() {
+  if (_instanceUrlCache) return _instanceUrlCache;
+  const result = await runSf(['org', 'display', '--target-org', TARGET_ORG, '--json']);
+  const url = result?.instanceUrl;
+  if (!url) throw new Error('sf org display returned no instanceUrl');
+  _instanceUrlCache = url;
+  return url;
+}
+
+/**
  * Quick health check: run a trivial query.
  * @returns {Promise<{ok: boolean, error?: string}>}
  */

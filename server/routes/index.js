@@ -9,6 +9,7 @@ import * as calendarRoute from './calendar.js';
 import * as oauthRoute from './oauth.js';
 import * as cacheRoute from './cache.js';
 import * as overridesRoute from './overrides.js';
+import * as sfRoute from './sf.js';
 
 const ROUTES = [
   { method: 'GET', path: '/api/health', handler: healthRoute.get },
@@ -41,6 +42,8 @@ const ROUTES = [
   { method: 'POST', path: '/api/override',       handler: overridesRoute.set },
   { method: 'POST', path: '/api/override/clear', handler: overridesRoute.clear },
   { method: 'GET',  path: '/api/override/stats', handler: overridesRoute.stats },
+  // Salesforce instance metadata (for "Open in Salesforce" record links)
+  { method: 'GET',  path: '/api/sf/instance-url', handler: sfRoute.instanceUrl },
 ];
 
 export function match(method, path) {

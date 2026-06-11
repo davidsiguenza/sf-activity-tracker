@@ -35,6 +35,7 @@ const state = {
   draftRows: new Map(),
   showLogged: loadShowLogged(),
   selectedEventId: null,
+  sfInstanceUrl: null, // resolved lazily from /api/sf/instance-url
   filters: {
     text: '',
     statuses: new Set(), // empty = no status filter
@@ -102,6 +103,21 @@ async function init() {
   state.config = cfgResp.config;
   showApp();
   refreshBackendBadge();
+  // Fetch the SF instance URL once so calendar clicks on already-logged events
+  // can open the record in a new tab. Failure is non-fatal — clicks just fall
+  // back to the legacy toggle behavior.
+  fetchJson('/api/sf/instance-url')
+    .then((r) => { state.sfInstanceUrl = r?.instanceUrl || null; })
+    .catch(() => { /* ignore — link feature stays disabled */ });
+}
+
+/**
+ * Build the Lightning record URL for an Event Id, or null if we don't yet
+ * have the instance URL or the id is missing.
+ */
+function sfEventUrl(eventId) {
+  if (!state.sfInstanceUrl || !eventId) return null;
+  return `${state.sfInstanceUrl}/lightning/r/Event/${eventId}/view`;
 }
 
 /**
@@ -400,15 +416,27 @@ function initCalendar() {
     },
     eventClick(info) {
       info.jsEvent.preventDefault();
-      // Skip ghost SF-only events (no draft row to toggle)
-      if (info.event.extendedProps?.isSfOnly) return;
-      // Click in the calendar = toggle the row's "create in org62" checkbox.
+      const props = info.event.extendedProps || {};
+      // Ghost SF-only events: open the SF record directly.
+      if (props.isSfOnly) {
+        const url = sfEventUrl(props.sfData?.id);
+        if (url) window.open(url, '_blank', 'noopener');
+        return;
+      }
+      // Already-logged events: open the linked SF record (double-check use case).
+      const cls = props.classification;
+      if (cls?.status === 'already-logged') {
+        const url = sfEventUrl(cls.salesforceEventId);
+        if (url) window.open(url, '_blank', 'noopener');
+        return;
+      }
+      // Otherwise: toggle the row's "create in org62" checkbox.
       // We programmatically click the table checkbox so its existing change
       // handler runs (updates row.selected, refreshes button, etc.).
       const cb = document.querySelector(
         `#draft-plan-table tbody tr[data-event-id="${CSS.escape(info.event.id)}"] input[type="checkbox"]`
       );
-      if (!cb || cb.disabled) return; // already-logged / excluded / skip
+      if (!cb || cb.disabled) return; // excluded / skip
       cb.click();
       // Force the calendar event's classes to re-evaluate so the green ring
       // appears/disappears in sync.
