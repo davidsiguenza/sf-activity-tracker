@@ -4,6 +4,13 @@ Local web app que lee Google Calendar, matchea eventos con oportunidades de **or
 
 > Built by [@davidsiguenza](https://github.com/davidsiguenza) — pensado para SEs que quieren ver de un vistazo qué del calendario está logueado y qué falta, en lugar de ir evento a evento.
 
+## 📦 ¿Vienes a instalar?
+
+→ **Lee [SETUP.md](SETUP.md)** (15-20 min, paso a paso).
+Antes de empezar: `./bin/preflight-check.sh` te valida los pre-requisitos. Tras el setup: `./bin/health-check.sh` confirma que todo está conectado.
+
+Para entender cómo se conecta a Salesforce (útil si construyes algo similar): [SALESFORCE-CONNECTION.md](SALESFORCE-CONNECTION.md).
+
 ## Por qué
 
 | Herramienta | Visualiza | Auto-matchea | Clasifica | Crea events |

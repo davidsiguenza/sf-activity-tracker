@@ -8,13 +8,21 @@ Step-by-step para que otro SE pueda correr sf-activity-tracker en su Mac con SU 
 
 ## 0. Pre-requisitos
 
-Verifica primero que tienes todo. Pega esto en una terminal y comprueba:
+Hay un script que valida todo de una sola vez. Después de clonar el repo (paso 1), corre:
+
+```bash
+./bin/preflight-check.sh
+```
+
+Te dirá en verde lo que tienes y en rojo lo que falta, con los comandos exactos para arreglar cada cosa.
+
+**Si quieres saber qué comprueba sin clonar todavía**, son estos 4 binarios:
 
 ```bash
 node --version       # >= v20
 sf --version         # @salesforce/cli/2.x
-which claude         # /Users/<you>/.local/bin/claude  (DevBar T&P)
 git --version
+which claude         # opcional — ver tabla abajo
 ```
 
 **Si te falta algo:**
@@ -22,9 +30,9 @@ git --version
 | Falta | Cómo instalarlo |
 |---|---|
 | **Node.js** ≥ 20 | `brew install node` o `nvm install 20` |
-| **Salesforce CLI** | `brew install --cask sfdx-cli` (o sigue [docs oficiales](https://developer.salesforce.com/tools/sfdxcli)) |
-| **Claude Code** (DevBar) | Sigue el canvas T&P de Salesforce internal — necesitas la licencia de tu cuenta `@salesforce.com`. Sin esto, la clasificación no funciona. |
-| **git / gh** | `brew install git gh` |
+| **Salesforce CLI v2** | `npm install -g @salesforce/cli` (o `brew install --cask sfdx-cli`) |
+| **git** | `brew install git` |
+| **Claude Code** (DevBar T&P) | **Opcional**. Solo se usa como fallback de calendario. Si configuras el camino "Google Calendar API directo" (paso 4), no lo necesitas. Si lo quieres, mira el canvas T&P interno de Salesforce — necesita licencia con cuenta `@salesforce.com`. |
 
 ---
 
@@ -187,7 +195,26 @@ La primera vez macOS te pedirá permisos para abrir un `.command` desde Finder �
 
 ---
 
-## 7. ¡Listo! Primer Analyze
+## 7. Smoke test — valida que todo está conectado
+
+Antes de usarlo en serio, corre el health check:
+
+```bash
+./bin/health-check.sh
+```
+
+Debe terminar con `0 errors`. Si hay algún rojo, sigue las hints que sugiere — la mayoría son fallos de auth y se resuelven con un `sf org login web --alias org62` o reconectando Google desde Settings.
+
+Lo que debe estar en verde tras un setup completo:
+- Server up
+- `/api/health` → ok (Salesforce reachable + config presente)
+- `oauth-client.json` y `oauth-tokens.json` presentes
+- Google Calendar API configured (fast path)
+- launchd agent cargado
+
+---
+
+## 8. ¡Listo! Primer Analyze
 
 1. Abre la app (doble-click el atajo del Desktop o `http://127.0.0.1:7825`)
 2. Selecciona un rango pequeño (ej. "Ayer" o "Esta semana")
