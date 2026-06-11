@@ -300,6 +300,41 @@ Wellness</textarea>
         <h3>Correcciones de Task Type</h3>
         <table id="correction-table"><thead><tr><th>Keyword</th><th>SE Task Type</th></tr></thead><tbody></tbody></table>
       </section>
+      <section id="dc-filters-section">
+        <h3>Reglas de filtrado de DCs</h3>
+        <p class="hint">Cómo se filtran tus Deal Contributions (DCs) antes de pasarlas al clasificador y al dropdown de Related To. Las opciones se cargan de los valores que existen en TUS DCs ahora mismo. Cambiar cualquier valor invalida el classification cache.</p>
+
+        <label>Días de retroactividad para opps cerradas
+          <input type="number" id="dcf-closed-lookback" min="0" max="365" />
+        </label>
+        <p class="hint">Opps cerradas hace más de N días se descartan. Si analizas eventos retroactivos, súbelo. Default: 30.</p>
+
+        <div style="display: flex; gap: 12px;">
+          <label style="flex: 1;">Min split %
+            <input type="number" id="dcf-min-split" min="0" max="100" step="1" />
+          </label>
+          <label style="flex: 1;">Max split %
+            <input type="number" id="dcf-max-split" min="0" max="100" step="1" />
+          </label>
+        </div>
+        <p class="hint">Banda 0..100 = sin filtro. Para "solo principal" pon min=50.</p>
+
+        <h4 style="margin: 14px 0 4px 0; font-size: 12px; color: var(--muted); text-transform: uppercase;">Opportunity Stage a EXCLUIR</h4>
+        <p class="hint">Tilda las stages que quieres ocultar del clasificador y del dropdown.</p>
+        <div id="dcf-stages-list" class="dcf-checkbox-list"><span class="hint">Cargando…</span></div>
+
+        <h4 style="margin: 14px 0 4px 0; font-size: 12px; color: var(--muted); text-transform: uppercase;">DC Role</h4>
+        <p class="hint">Tilda los roles que quieres INCLUIR. Vacío = todos.</p>
+        <div id="dcf-roles-list" class="dcf-checkbox-list"><span class="hint">Cargando…</span></div>
+
+        <h4 style="margin: 14px 0 4px 0; font-size: 12px; color: var(--muted); text-transform: uppercase;">Engagement Status</h4>
+        <p class="hint">Tilda los estados que quieres INCLUIR. Vacío = todos.</p>
+        <div id="dcf-engagement-list" class="dcf-checkbox-list"><span class="hint">Cargando…</span></div>
+
+        <button class="btn btn-primary" id="dc-filters-save-btn" style="margin-top: 12px;">Guardar reglas</button>
+        <span id="dc-filters-status" class="hint" style="margin-left: 8px;"></span>
+      </section>
+
       <section>
         <h3>Classification cache</h3>
         <p class="hint">Eventos ya clasificados se guardan en disco y NO se re-clasifican en analizes posteriores (instantáneos para esos). Se invalida solo cuando guardas un alias o corrección.</p>

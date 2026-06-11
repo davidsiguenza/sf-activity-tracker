@@ -20,6 +20,7 @@ const ROUTES = [
   { method: 'POST', path: '/api/setup/save', handler: setupRoute.saveSetup },
   { method: 'POST', path: '/api/setup/lookup', handler: setupRoute.lookupRecord },
   { method: 'POST', path: '/api/setup/resolve-id', handler: setupRoute.resolveId },
+  { method: 'GET',  path: '/api/dc-filters/options', handler: setupRoute.dcFilterOptions },
   { method: 'POST', path: '/api/analyze', handler: analyzeRoute.post },
   { method: 'POST', path: '/api/create', handler: createRoute.post },
   { method: 'GET',  path: '/api/calendar/status', handler: calendarRoute.status },

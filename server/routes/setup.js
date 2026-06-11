@@ -114,6 +114,50 @@ export async function resolveId({ body, sendJson, res }) {
 }
 
 /**
+ * GET /api/dc-filters/options
+ * Returns distinct StageName, Opportunity_Role__c and Engagement_Status__c
+ * values that exist across the SE's DCs. Used to render the multi-select
+ * checkboxes in Settings → DC filtering rules so the user only sees values
+ * that actually appear in their data (not the full org-wide picklists).
+ */
+export async function dcFilterOptions({ sendJson, res }) {
+  const cfg = (await import('../lib/config-store.js')).load();
+  if (!cfg?.seUserId) return sendJson(res, 400, { error: 'Setup not complete' });
+
+  const records = await query(
+    `SELECT Opportunity__r.StageName, Opportunity_Role__c, Engagement_Status__c
+     FROM Deal_Contribution__c
+     WHERE SE_Name__c = '${cfg.seUserId}' AND IsDeleted = FALSE`
+  );
+
+  // Tally each value with its count. `includeEmpty` adds an explicit
+  // "(no definido)" entry for DCs where the field isn't set — useful for
+  // Engagement_Status__c which is often blank.
+  const tally = (getter, { includeEmpty = false } = {}) => {
+    const counts = new Map();
+    let empty = 0;
+    for (const r of records) {
+      const v = getter(r);
+      if (!v) { empty++; continue; }
+      counts.set(v, (counts.get(v) || 0) + 1);
+    }
+    const arr = [...counts.entries()]
+      .map(([value, count]) => ({ value, count }))
+      .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+    if (includeEmpty && empty > 0) {
+      arr.push({ value: '', label: '(no definido)', count: empty });
+    }
+    return arr;
+  };
+
+  return sendJson(res, 200, {
+    stages: tally((r) => r.Opportunity__r?.StageName),
+    roles: tally((r) => r.Opportunity_Role__c),
+    engagementStatuses: tally((r) => r.Engagement_Status__c, { includeEmpty: true }),
+  });
+}
+
+/**
  * POST /api/setup/lookup
  * Body: { search }
  * Searches Opportunity, Account, Strategic Initiative, Deal Support Request by name.

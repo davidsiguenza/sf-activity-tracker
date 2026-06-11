@@ -9,26 +9,32 @@ import * as classCache from './classification-cache.js';
 import * as overrides from './overrides-store.js';
 
 /**
- * Fetch the SE's Deal Contributions with related Opportunity + Account info.
- * Filters out DCs whose Opportunity has been closed for more than CLOSED_DC_TTL_DAYS.
- * Old long-closed opps clutter the dropdown and confuse the classifier; if the user
- * really needs to log against one, they can paste its URL via the manual flow.
+ * Fetch the SE's Deal Contributions, then apply user-configurable filters
+ * from config.dcFilters. The defaults give the same behavior as before
+ * (closed opps within 30 days; no split / stage / role filters).
  */
-const CLOSED_DC_TTL_DAYS = 30;
-
-export async function fetchDcOpportunities(seUserId) {
+export async function fetchDcOpportunities(seUserId, dcFilters = {}) {
   const records = await query(
     `SELECT Id, Opportunity__c, Opportunity__r.Name, Opportunity__r.IsClosed,
-            Opportunity__r.CloseDate, Opportunity__r.AccountId,
+            Opportunity__r.CloseDate, Opportunity__r.StageName,
+            Opportunity__r.AccountId,
             Opportunity__r.Account.Name, Opportunity__r.Account.ParentId,
             Opportunity__r.Account.Parent.Name,
+            Opportunity_Role__c, Engagement_Status__c,
             Split_Percentage__c, CreatedDate
      FROM Deal_Contribution__c
      WHERE SE_Name__c = '${seUserId}' AND IsDeleted = FALSE
      ORDER BY CreatedDate DESC`
   );
 
-  const cutoff = Date.now() - CLOSED_DC_TTL_DAYS * 24 * 60 * 60 * 1000;
+  const lookbackDays = Number.isFinite(dcFilters.closedLookbackDays) ? dcFilters.closedLookbackDays : 30;
+  const minSplit = Number.isFinite(dcFilters.minSplitPercentage) ? dcFilters.minSplitPercentage : 0;
+  const maxSplit = Number.isFinite(dcFilters.maxSplitPercentage) ? dcFilters.maxSplitPercentage : 100;
+  const excludeStages = (dcFilters.excludeOppStages || []).map(normalizeForCompare);
+  const includeRoles = (dcFilters.includeRoles || []).map(normalizeForCompare);
+  const includeEngagementStatuses = (dcFilters.includeEngagementStatuses || []).map(normalizeForCompare);
+  const cutoff = Date.now() - lookbackDays * 24 * 60 * 60 * 1000;
+
   return records
     .map((r) => ({
       dcId: r.Id,
@@ -36,17 +42,45 @@ export async function fetchDcOpportunities(seUserId) {
       opportunityName: r.Opportunity__r?.Name || '',
       opportunityIsClosed: !!r.Opportunity__r?.IsClosed,
       opportunityCloseDate: r.Opportunity__r?.CloseDate || null,
+      opportunityStage: r.Opportunity__r?.StageName || '',
       accountId: r.Opportunity__r?.AccountId || null,
       accountName: r.Opportunity__r?.Account?.Name || '',
       accountParentName: r.Opportunity__r?.Account?.Parent?.Name || '',
+      role: r.Opportunity_Role__c || '',
+      engagementStatus: r.Engagement_Status__c || '',
       splitPercentage: r.Split_Percentage__c ?? null,
     }))
     .filter((d) => {
-      // Keep all open opps. Drop opps closed before the cutoff.
-      if (!d.opportunityIsClosed) return true;
-      if (!d.opportunityCloseDate) return true; // unknown close date — keep, edge case
-      return new Date(d.opportunityCloseDate).getTime() >= cutoff;
+      // 1) Closed-opp lookback (existing behavior, configurable)
+      if (d.opportunityIsClosed && d.opportunityCloseDate) {
+        if (new Date(d.opportunityCloseDate).getTime() < cutoff) return false;
+      }
+      // 2) Split percentage band — null splits skip this check (treat as unknown)
+      const sp = d.splitPercentage;
+      if (sp !== null && sp !== undefined) {
+        if (sp < minSplit || sp > maxSplit) return false;
+      }
+      // 3) Stage exclusion (blacklist only — no whitelist needed in practice)
+      if (excludeStages.length > 0) {
+        const stage = normalizeForCompare(d.opportunityStage);
+        if (excludeStages.includes(stage)) return false;
+      }
+      // 4) DC role whitelist
+      if (includeRoles.length > 0) {
+        const role = normalizeForCompare(d.role);
+        if (!includeRoles.includes(role)) return false;
+      }
+      // 5) Engagement Status whitelist
+      if (includeEngagementStatuses.length > 0) {
+        const es = normalizeForCompare(d.engagementStatus);
+        if (!includeEngagementStatuses.includes(es)) return false;
+      }
+      return true;
     });
+}
+
+function normalizeForCompare(s) {
+  return (s || '').trim().toLowerCase();
 }
 
 /**
@@ -221,7 +255,7 @@ export async function analyze({ fromIso, toIso, config, forceRefresh = false, fo
   let alreadyLogged = [];
   try {
     [dcOpportunities, alreadyLogged] = await Promise.all([
-      fetchDcOpportunities(config.seUserId),
+      fetchDcOpportunities(config.seUserId, config.dcFilters || {}),
       fetchAlreadyLogged(config.seUserId, fromIso, toIso),
     ]);
   } catch (e) {

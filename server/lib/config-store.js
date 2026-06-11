@@ -21,6 +21,23 @@ const DEFAULT_CONFIG = {
   taxonomyCorrections: [],
   enabledCalendarIds: [], // empty = all visible. Otherwise, only fetch from these calendar IDs.
   manualRelatedRecords: [], // {id, name, type, addedAt} — records the user pasted manually; persisted across sessions and shown in every dropdown.
+  dcFilters: {
+    // Days back from today to include closed Opportunities (ones closed before
+    // this cutoff are dropped from the picker AND from the classifier prompt).
+    closedLookbackDays: 30,
+    // Inclusive split-percentage band on the SE's Deal_Contribution__c record.
+    // Default 0..100 = no filter. Set min=50 for "only primary contributor".
+    minSplitPercentage: 0,
+    maxSplitPercentage: 100,
+    // Blacklist of Opportunity StageName. Empty array = no constraint.
+    excludeOppStages: [],
+    // Whitelist of Opportunity_Role__c on the DC (Core SE, Pursuit, Specialist…).
+    // Empty array = all roles.
+    includeRoles: [],
+    // Whitelist of Engagement_Status__c on the DC (Planning, In Process, Completed…).
+    // Empty array = all statuses.
+    includeEngagementStatuses: [],
+  },
   createdAt: null,
   updatedAt: null,
 };

@@ -1553,6 +1553,8 @@ async function openSettings() {
   await refreshGoogleApiSection();
   // Calendar picker — only meaningful when Google API is configured
   await refreshCalendarPicker();
+  // DC filtering rules
+  await refreshDcFiltersSection();
   // Classification cache stats
   await refreshClassCacheSection();
 
@@ -1694,6 +1696,109 @@ function paintOauthStatus(el, s) {
   }
   el.style.color = '#57606a';
   el.textContent = '⏵ Sin conectar. Sube tu OAuth client JSON (Paso 1) y pulsa Connect.';
+}
+
+// ─── DC filters section ──────────────────────────────────────────────────────
+
+async function refreshDcFiltersSection() {
+  const cfg = state.config || {};
+  const f = cfg.dcFilters || {};
+  document.getElementById('dcf-closed-lookback').value = f.closedLookbackDays ?? 30;
+  document.getElementById('dcf-min-split').value = f.minSplitPercentage ?? 0;
+  document.getElementById('dcf-max-split').value = f.maxSplitPercentage ?? 100;
+
+  // Load distinct values from the user's actual DC data + render checkboxes
+  let opts;
+  try {
+    opts = await fetchJson('/api/dc-filters/options');
+  } catch (e) {
+    document.getElementById('dcf-stages-list').textContent = `Error: ${e.message}`;
+    return;
+  }
+
+  renderDcfCheckboxList('dcf-stages-list',     opts.stages,             f.excludeOppStages);
+  renderDcfCheckboxList('dcf-roles-list',      opts.roles,              f.includeRoles);
+  renderDcfCheckboxList('dcf-engagement-list', opts.engagementStatuses, f.includeEngagementStatuses);
+
+  // Wire the save button (idempotent)
+  const saveBtn = document.getElementById('dc-filters-save-btn');
+  const statusEl = document.getElementById('dc-filters-status');
+  saveBtn.onclick = async () => {
+    const dcFilters = {
+      closedLookbackDays: parseInt(document.getElementById('dcf-closed-lookback').value, 10) || 0,
+      minSplitPercentage: clampPct(document.getElementById('dcf-min-split').value, 0),
+      maxSplitPercentage: clampPct(document.getElementById('dcf-max-split').value, 100),
+      excludeOppStages: getDcfChecked('dcf-stages-list'),
+      includeRoles: getDcfChecked('dcf-roles-list'),
+      includeEngagementStatuses: getDcfChecked('dcf-engagement-list'),
+    };
+    if (dcFilters.minSplitPercentage > dcFilters.maxSplitPercentage) {
+      statusEl.style.color = '#cf222e';
+      statusEl.textContent = 'min split no puede ser mayor que max';
+      return;
+    }
+
+    try {
+      await fetchJson('/api/config', { method: 'PUT', body: { dcFilters } });
+      // Changing DC filters changes which opps are visible to the classifier
+      // → previous classifications might map to a now-excluded opp. Clear cache.
+      await fetchJson('/api/cache/clear', { method: 'POST' });
+      state.config.dcFilters = dcFilters;
+      statusEl.style.color = '#1a7f37';
+      statusEl.textContent = '✓ Reglas guardadas. Classification cache limpiado.';
+    } catch (e) {
+      statusEl.style.color = '#cf222e';
+      statusEl.textContent = `✗ ${e.message}`;
+    }
+  };
+}
+
+/**
+ * Render a list of {value, count} options as labeled checkboxes inside the
+ * given container. Pre-checks any option whose value matches the savedValues
+ * array (case-insensitive comparison so user-entered values still match).
+ */
+function renderDcfCheckboxList(containerId, options, savedValues) {
+  const container = document.getElementById(containerId);
+  container.replaceChildren();
+  if (!options || options.length === 0) {
+    const span = document.createElement('span');
+    span.className = 'hint';
+    span.textContent = 'No hay valores en tus DCs todavía.';
+    container.appendChild(span);
+    return;
+  }
+  const savedSet = new Set((savedValues || []).map((s) => (s || '').toLowerCase().trim()));
+  for (const opt of options) {
+    const label = document.createElement('label');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.dataset.value = opt.value;
+    cb.checked = savedSet.has((opt.value || '').toLowerCase().trim());
+    label.appendChild(cb);
+    const text = document.createElement('span');
+    // opt.label is set for synthetic entries like the "(no definido)" placeholder
+    // for blank-value records; otherwise just show the raw value.
+    text.textContent = opt.label || opt.value;
+    if (opt.label) text.style.fontStyle = 'italic';
+    label.appendChild(text);
+    const count = document.createElement('span');
+    count.className = 'dcf-count';
+    count.textContent = `${opt.count}`;
+    label.appendChild(count);
+    container.appendChild(label);
+  }
+}
+
+function getDcfChecked(containerId) {
+  return [...document.querySelectorAll(`#${containerId} input[type="checkbox"]:checked`)]
+    .map((cb) => cb.dataset.value);
+}
+
+function clampPct(v, fallback) {
+  const n = parseInt(v, 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0, Math.min(100, n));
 }
 
 // ─── Classification cache section ────────────────────────────────────────────

@@ -443,11 +443,21 @@ textarea { font-family: inherit; }
 
 pre { background: #f6f8fa; padding: 12px; border-radius: 4px; overflow: auto; font-size: 12px; }
 
-.calendar-picker-list {
+.calendar-picker-list,
+.dcf-checkbox-list {
   display: flex; flex-direction: column; gap: 4px;
-  max-height: 240px; overflow-y: auto;
+  max-height: 200px; overflow-y: auto;
   border: 1px solid var(--border); border-radius: 4px;
   padding: 8px; background: #f9fafb;
+}
+.dcf-checkbox-list label {
+  display: flex; align-items: center; gap: 8px; margin: 0; cursor: pointer;
+  padding: 3px 4px; border-radius: 3px;
+  font-size: 13px; color: var(--text);
+}
+.dcf-checkbox-list label:hover { background: #e6eaf0; }
+.dcf-checkbox-list .dcf-count {
+  margin-left: auto; color: var(--muted); font-size: 11px;
 }
 .calendar-picker-list label {
   display: flex; align-items: center; gap: 8px; margin: 0; cursor: pointer;
