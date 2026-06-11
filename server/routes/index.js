@@ -17,6 +17,7 @@ const ROUTES = [
   { method: 'PUT', path: '/api/config', handler: configRoute.put },
   { method: 'POST', path: '/api/config/alias', handler: configRoute.addAliasHandler },
   { method: 'POST', path: '/api/config/correction', handler: configRoute.addCorrectionHandler },
+  { method: 'GET',  path: '/api/setup/whoami', handler: setupRoute.whoami },
   { method: 'POST', path: '/api/setup/resolve-user', handler: setupRoute.resolveUser },
   { method: 'POST', path: '/api/setup/save', handler: setupRoute.saveSetup },
   { method: 'POST', path: '/api/setup/lookup', handler: setupRoute.lookupRecord },

@@ -26,8 +26,8 @@
     <section id="setup-wizard" class="card hidden">
       <h2>Setup</h2>
       <p>Vamos a configurar tu identidad en org62 y un par de preferencias.</p>
-      <label>Tu email Salesforce
-        <input type="email" id="setup-email" value="dsiguenza@salesforce.com" />
+      <label>Tu email Salesforce <span class="hint" id="setup-email-hint" style="font-weight:normal;">(detectando desde <code>sf</code> CLI…)</span>
+        <input type="email" id="setup-email" value="" />
       </label>
       <button class="btn btn-primary" id="setup-resolve-btn">Resolver mi user en org62</button>
       <div id="setup-resolve-result" class="hint"></div>
@@ -253,6 +253,17 @@ Wellness</textarea>
         <h2>Settings</h2>
         <button class="btn btn-ghost" id="settings-close">✕</button>
       </header>
+
+      <nav class="settings-tabs" role="tablist">
+        <button class="settings-tab-btn" data-tab="account"        role="tab">Cuenta</button>
+        <button class="settings-tab-btn" data-tab="calendar"       role="tab">Calendario</button>
+        <button class="settings-tab-btn" data-tab="classification" role="tab">Clasificación</button>
+        <button class="settings-tab-btn" data-tab="dcs"            role="tab">DCs</button>
+        <button class="settings-tab-btn" data-tab="debug"          role="tab">Debug</button>
+      </nav>
+
+      <!-- ───── Calendario ───── -->
+      <div class="settings-tab-panel" data-tab="calendar">
       <section id="google-api-section">
         <h3>Google Calendar backend</h3>
         <p class="hint">Conecta tu Google Calendar para fetch directo (rápido, sin tokens LLM). Setup en la app, sin terminal.</p>
@@ -294,7 +305,29 @@ Wellness</textarea>
           <button class="btn btn-primary" id="calendar-picker-save-btn">Save selection</button>
         </div>
       </section>
+      </div><!-- /Calendario -->
 
+      <!-- ───── Cuenta ───── -->
+      <div class="settings-tab-panel" data-tab="account">
+      <section>
+        <h3>Identidad</h3>
+        <p class="hint" id="account-identity-display">Cargando…</p>
+      </section>
+      <section>
+        <h3>Excluded titles</h3>
+        <p class="hint">Eventos cuyo título coincida con cualquiera de estos NUNCA se loguean.</p>
+        <textarea id="settings-excluded" rows="4"></textarea>
+        <button class="btn btn-primary" id="settings-save-btn">Guardar</button>
+      </section>
+      <section>
+        <h3>Catch-all record</h3>
+        <p class="hint">Record opcional para actividades sin opp clara (ej. enablement interno).</p>
+        <div id="catchall-display" class="hint">No configurado.</div>
+      </section>
+      </div><!-- /Cuenta -->
+
+      <!-- ───── Clasificación ───── -->
+      <div class="settings-tab-panel" data-tab="classification">
       <section>
         <h3>Aliases</h3>
         <p class="hint">Cuando un keyword del título matchea con un alias, se usa el record mapeado directamente.</p>
@@ -304,6 +337,19 @@ Wellness</textarea>
         <h3>Correcciones de Task Type</h3>
         <table id="correction-table"><thead><tr><th>Keyword</th><th>SE Task Type</th></tr></thead><tbody></tbody></table>
       </section>
+      <section>
+        <h3>Classification cache</h3>
+        <p class="hint">Eventos ya clasificados se guardan en disco y NO se re-clasifican en analizes posteriores (instantáneos para esos). Se invalida solo cuando guardas un alias o corrección.</p>
+        <div id="class-cache-stats" class="hint">Cargando…</div>
+        <div style="margin-top: 8px; display: flex; gap: 8px;">
+          <button class="btn btn-ghost" id="class-cache-prune-btn">Prune (>90 días)</button>
+          <button class="btn btn-ghost" id="class-cache-clear-btn">Clear cache</button>
+        </div>
+      </section>
+      </div><!-- /Clasificación -->
+
+      <!-- ───── DCs ───── -->
+      <div class="settings-tab-panel" data-tab="dcs">
       <section id="dc-filters-section">
         <h3>Reglas de filtrado de DCs</h3>
         <p class="hint">Cómo se filtran tus Deal Contributions (DCs) antes de pasarlas al clasificador y al dropdown de Related To. Las opciones se cargan de los valores que existen en TUS DCs ahora mismo. Cambiar cualquier valor invalida el classification cache.</p>
@@ -338,31 +384,15 @@ Wellness</textarea>
         <button class="btn btn-primary" id="dc-filters-save-btn" style="margin-top: 12px;">Guardar reglas</button>
         <span id="dc-filters-status" class="hint" style="margin-left: 8px;"></span>
       </section>
+      </div><!-- /DCs -->
 
-      <section>
-        <h3>Classification cache</h3>
-        <p class="hint">Eventos ya clasificados se guardan en disco y NO se re-clasifican en analizes posteriores (instantáneos para esos). Se invalida solo cuando guardas un alias o corrección.</p>
-        <div id="class-cache-stats" class="hint">Cargando…</div>
-        <div style="margin-top: 8px; display: flex; gap: 8px;">
-          <button class="btn btn-ghost" id="class-cache-prune-btn">Prune (>90 días)</button>
-          <button class="btn btn-ghost" id="class-cache-clear-btn">Clear cache</button>
-        </div>
-      </section>
-
-      <section>
-        <h3>Catch-all record</h3>
-        <p class="hint">Record opcional para actividades sin opp clara (ej. enablement interno).</p>
-        <div id="catchall-display" class="hint">No configurado.</div>
-      </section>
-      <section>
-        <h3>Excluded titles</h3>
-        <textarea id="settings-excluded" rows="4"></textarea>
-        <button class="btn btn-primary" id="settings-save-btn">Guardar</button>
-      </section>
+      <!-- ───── Debug ───── -->
+      <div class="settings-tab-panel" data-tab="debug">
       <section>
         <h3>Config raw</h3>
         <details><summary>Ver JSON</summary><pre id="config-raw"></pre></details>
       </section>
+      </div><!-- /Debug -->
     </div>
   </div>
 

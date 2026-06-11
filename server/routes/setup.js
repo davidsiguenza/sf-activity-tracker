@@ -1,6 +1,21 @@
-import { query } from '../services/salesforce.js';
+import { query, getOrgInfo } from '../services/salesforce.js';
 import { save, addManualRelatedRecord } from '../lib/config-store.js';
 import * as classCache from '../services/classification-cache.js';
+
+/**
+ * GET /api/setup/whoami
+ * Returns the email of the user currently authenticated against org62 via the
+ * `sf` CLI. Used by the setup wizard to auto-fill the email field.
+ */
+export async function whoami({ sendJson, res }) {
+  try {
+    const { username } = await getOrgInfo();
+    if (!username) return sendJson(res, 404, { error: 'no username from sf org display' });
+    return sendJson(res, 200, { username });
+  } catch (e) {
+    return sendJson(res, 500, { error: e.message });
+  }
+}
 
 /**
  * POST /api/setup/resolve-user

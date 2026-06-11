@@ -173,10 +173,11 @@ function showSetup(defaults) {
   const resolveBtn = document.getElementById('setup-resolve-btn');
   const saveBtn = document.getElementById('setup-save-btn');
   const result = document.getElementById('setup-resolve-result');
+  const emailInput = document.getElementById('setup-email');
+  const emailHint = document.getElementById('setup-email-hint');
   let resolved = null;
 
-  resolveBtn.addEventListener('click', async () => {
-    const email = document.getElementById('setup-email').value.trim();
+  const doResolve = async (email) => {
     result.textContent = 'Resolviendo en org62…';
     try {
       resolved = await fetchJson('/api/setup/resolve-user', { method: 'POST', body: { email } });
@@ -189,7 +190,30 @@ function showSetup(defaults) {
       result.textContent = `✗ ${e.message}`;
       saveBtn.disabled = true;
     }
-  });
+  };
+
+  resolveBtn.addEventListener('click', () => doResolve(emailInput.value.trim()));
+
+  // Auto-detect from `sf` CLI. The app only logs activities for the user
+  // authenticated against org62 — so pre-fill and auto-resolve. User can still
+  // override manually if the CLI is misconfigured.
+  fetchJson('/api/setup/whoami')
+    .then((r) => {
+      if (!r?.username) throw new Error('no username');
+      emailInput.value = r.username;
+      emailInput.readOnly = true;
+      emailHint.innerHTML = `(auto-detectado de <code>sf</code> CLI · <a href="#" id="setup-email-edit">editar</a>)`;
+      document.getElementById('setup-email-edit').addEventListener('click', (ev) => {
+        ev.preventDefault();
+        emailInput.readOnly = false;
+        emailInput.focus();
+      });
+      doResolve(r.username);
+    })
+    .catch(() => {
+      emailHint.textContent = '(no se pudo auto-detectar — escríbelo manualmente)';
+      emailInput.value = 'dsiguenza@salesforce.com';
+    });
 
   saveBtn.addEventListener('click', async () => {
     const role = document.getElementById('setup-role').value.trim() || 'Core SE';
@@ -1626,6 +1650,27 @@ async function openSettings() {
   document.getElementById('config-raw').textContent = JSON.stringify(cfg.config, null, 2);
   document.getElementById('settings-excluded').value = (cfg.config.excludedTitles || []).join('\n');
 
+  // Identidad — read-only, derivada del setup. La org auth manda; no editable aquí.
+  const idDisplay = document.getElementById('account-identity-display');
+  if (idDisplay) {
+    idDisplay.replaceChildren();
+    idDisplay.appendChild(text(`Logueado en org62 como `));
+    const b = document.createElement('b'); b.textContent = cfg.config.seName || '?'; idDisplay.appendChild(b);
+    idDisplay.appendChild(text(` (${cfg.config.seEmail || '?'}). User Id: ${cfg.config.seUserId || '?'} · TZ ${cfg.config.timeZone || '?'}.`));
+    const br = document.createElement('br'); idDisplay.appendChild(br);
+    idDisplay.appendChild(text('Esta identidad se auto-detecta del '));
+    const code = document.createElement('code'); code.textContent = 'sf'; idDisplay.appendChild(code);
+    idDisplay.appendChild(text(' CLI en cada nuevo setup. Si necesitas cambiarla, re-autentícate con '));
+    const code2 = document.createElement('code'); code2.textContent = 'sf org login web --alias org62'; idDisplay.appendChild(code2);
+    idDisplay.appendChild(text(' y borra '));
+    const code3 = document.createElement('code'); code3.textContent = '~/.config/sf-activity-tracker/config.json'; idDisplay.appendChild(code3);
+    idDisplay.appendChild(text('.'));
+  }
+
+  // Activate the last-used tab (or default to "calendar")
+  const lastTab = localStorage.getItem('sfat:settingsTab') || 'calendar';
+  switchSettingsTab(lastTab);
+
   // Google API section
   await refreshGoogleApiSection();
   // Calendar picker — only meaningful when Google API is configured
@@ -1675,6 +1720,27 @@ async function openSettings() {
 function closeSettings() {
   document.getElementById('settings-modal').classList.add('hidden');
 }
+
+/**
+ * Switch the active tab in the Settings modal. Persists to localStorage so the
+ * next time the user opens Settings they land on the same tab.
+ */
+function switchSettingsTab(tabKey) {
+  document.querySelectorAll('.settings-tab-btn').forEach((btn) => {
+    btn.classList.toggle('is-active', btn.dataset.tab === tabKey);
+  });
+  document.querySelectorAll('.settings-tab-panel').forEach((panel) => {
+    panel.classList.toggle('is-active', panel.dataset.tab === tabKey);
+  });
+  localStorage.setItem('sfat:settingsTab', tabKey);
+}
+
+// Wire tab buttons once at load — the modal markup is in the DOM from the start.
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.settings-tab-btn').forEach((btn) => {
+    btn.addEventListener('click', () => switchSettingsTab(btn.dataset.tab));
+  });
+});
 
 async function saveSettings() {
   const excluded = document.getElementById('settings-excluded').value.split('\n').map((s) => s.trim()).filter(Boolean);

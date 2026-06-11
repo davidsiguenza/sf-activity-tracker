@@ -438,6 +438,25 @@ textarea { font-family: inherit; }
 .modal-content header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .modal-content section { padding: 16px 0; border-bottom: 1px solid var(--border); }
 .modal-content section:last-child { border-bottom: none; }
+
+/* Tabs nav inside the Settings modal */
+.settings-tabs {
+  display: flex; gap: 2px; border-bottom: 1px solid var(--border);
+  margin-bottom: 4px; flex-wrap: wrap;
+}
+.settings-tab-btn {
+  background: transparent; border: none; border-bottom: 2px solid transparent;
+  padding: 8px 14px; cursor: pointer; font-size: 13px; color: var(--muted);
+  margin-bottom: -1px;
+}
+.settings-tab-btn:hover { color: var(--fg); }
+.settings-tab-btn.is-active {
+  color: var(--fg); font-weight: 600; border-bottom-color: var(--accent, #2563eb);
+}
+.settings-tab-panel { display: none; }
+.settings-tab-panel.is-active { display: block; }
+.settings-tab-panel > section:first-child { padding-top: 8px; }
+.settings-tab-panel > section:last-child  { border-bottom: none; }
 .modal-content table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .modal-content table th, .modal-content table td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border); }
 

@@ -136,18 +136,22 @@ function formatValue(v) {
 }
 
 /**
- * Resolve and cache the org's instance URL via `sf org display`.
- * Used by the frontend to build "Open in Salesforce" record links.
- * @returns {Promise<string>} e.g. https://gus.lightning.force.com
+ * Resolve and cache org metadata from `sf org display`. Returns the instance
+ * URL (for record links) AND the authenticated username (for setup auto-detect).
+ * @returns {Promise<{instanceUrl: string, username: string}>}
  */
-let _instanceUrlCache = null;
-export async function getInstanceUrl() {
-  if (_instanceUrlCache) return _instanceUrlCache;
+let _orgInfoCache = null;
+export async function getOrgInfo() {
+  if (_orgInfoCache) return _orgInfoCache;
   const result = await runSf(['org', 'display', '--target-org', TARGET_ORG, '--json']);
-  const url = result?.instanceUrl;
-  if (!url) throw new Error('sf org display returned no instanceUrl');
-  _instanceUrlCache = url;
-  return url;
+  if (!result?.instanceUrl) throw new Error('sf org display returned no instanceUrl');
+  _orgInfoCache = { instanceUrl: result.instanceUrl, username: result.username || null };
+  return _orgInfoCache;
+}
+
+/** Convenience wrapper for the older callers. */
+export async function getInstanceUrl() {
+  return (await getOrgInfo()).instanceUrl;
 }
 
 /**
