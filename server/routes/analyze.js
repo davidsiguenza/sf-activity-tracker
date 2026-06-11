@@ -10,7 +10,7 @@ export async function post({ body, sendJson, res }) {
   if (!cfg || !cfg.seUserId) {
     return sendJson(res, 400, { error: 'Setup not complete. Run /api/setup first.' });
   }
-  const { fromIso, toIso, forceRefresh, forceReclassify } = body || {};
+  const { fromIso, toIso, forceRefresh, forceReclassify, cacheOnly } = body || {};
   if (!fromIso || !toIso) {
     return sendJson(res, 400, { error: 'fromIso and toIso required (ISO 8601)' });
   }
@@ -31,6 +31,7 @@ export async function post({ body, sendJson, res }) {
     config: cfg,
     forceRefresh: !!forceRefresh,
     forceReclassify: !!forceReclassify,
+    cacheOnly: !!cacheOnly,
   });
 
   // Compute summary
@@ -47,7 +48,8 @@ function computeSummary(result) {
     excluded: 0,
     skip: 0,
     alreadyLogged: 0,
-    fresh: 0, // freshly classified this run (not from cache, not already-logged)
+    unclassified: 0, // pending claude classification (cacheOnly mode)
+    fresh: 0,        // freshly classified this run (not from cache, not already-logged)
   };
   let cfHours = 0;
   let crHours = 0;

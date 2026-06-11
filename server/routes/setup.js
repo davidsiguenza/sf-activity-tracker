@@ -1,5 +1,6 @@
 import { query } from '../services/salesforce.js';
 import { save, addManualRelatedRecord } from '../lib/config-store.js';
+import * as classCache from '../services/classification-cache.js';
 
 /**
  * POST /api/setup/resolve-user
@@ -83,12 +84,25 @@ export async function resolveId({ body, sendJson, res }) {
       if (records.length > 0) {
         const r = records[0];
         // Persist so this record appears in EVERY draft-plan dropdown going forward
-        try { addManualRelatedRecord({ id: r.Id, name: r.Name, type: c.type }); } catch {}
+        // AND becomes a candidate for the classifier in future analyzes.
+        let added = false;
+        try {
+          const before = (await import('../lib/config-store.js')).load()?.manualRelatedRecords || [];
+          const existed = before.some((m) => m.id === r.Id);
+          addManualRelatedRecord({ id: r.Id, name: r.Name, type: c.type });
+          added = !existed;
+        } catch {}
+        // If this is a NEW manual record, invalidate the classification cache
+        // so previously-classified events can be re-evaluated against it.
+        if (added) {
+          try { classCache.clearAll(); } catch {}
+        }
         return sendJson(res, 200, {
           id: r.Id,
           name: r.Name,
           type: c.type,
           isClosed: r.IsClosed ?? null,
+          classCacheCleared: added,
         });
       }
     } catch {

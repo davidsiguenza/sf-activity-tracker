@@ -48,6 +48,7 @@ export const TAXONOMY_BY_VALUE = Object.fromEntries(SE_TASK_TYPES.map((t) => [t.
  * @param {Array} ctx.dcOpportunities
  * @param {Array} ctx.aliasTable
  * @param {Array} ctx.taxonomyCorrections
+ * @param {Array} [ctx.manualRelatedRecords] - records the user pasted previously (Opportunity/Account/SI/DSR)
  * @param {string[]} ctx.excludedTitles
  * @param {string[]} ctx.internalEmailDomains
  * @param {Object|null} ctx.catchAll
@@ -85,14 +86,17 @@ ${formatAliasTable(ctx.aliasTable)}
 2. **Active Deal Contributions** — the SE has these DCs already; prefer matching against these opps and their accounts (and parent accounts):
 ${formatDcOpportunities(ctx.dcOpportunities)}
 
-3. **Salesforce URL or Id in title/description** — extract Opportunity/Account Ids (15 or 18 char IDs starting with 006/001) and use directly.
+3. **Manually-added records** — records the user has previously pasted by URL when no DC existed. Treat these the same priority as DC opportunities: if the event title or description names one of these (account name, opp name, project name), use it as relatedTo:
+${formatManualRelatedRecords(ctx.manualRelatedRecords)}
 
-4. **External attendee email domain** — try to map the domain to an account name (no DB lookup; just a hint to flag for review unless you can match to a DC opportunity).
+4. **Salesforce URL or Id in title/description** — extract Opportunity/Account Ids (15 or 18 char IDs starting with 006/001) and use directly.
 
-5. **Catch-all record** — if no match found and a catch-all is configured, use it for non-Customer-Facing activities only:
+5. **External attendee email domain** — try to map the domain to an account name (no DB lookup; just a hint to flag for review unless you can match to a DC opportunity).
+
+6. **Catch-all record** — if no match found and a catch-all is configured, use it for non-Customer-Facing activities only:
 ${ctx.catchAll ? `   - ${ctx.catchAll.type}: ${ctx.catchAll.name} (id: ${ctx.catchAll.id})` : '   (no catch-all configured)'}
 
-6. **Otherwise**: status="flagged", relatedTo=null. Always flag external-attendee meetings that don't match anything — they likely need a new opp/DC.
+7. **Otherwise**: status="flagged", relatedTo=null. Always flag external-attendee meetings that don't match anything — they likely need a new opp/DC.
 
 # CF/CR rules
 - CF = Customer Facing. CR = Customer Related.
@@ -138,6 +142,14 @@ function formatDcOpportunities(dcs) {
       const parent = d.accountParentName ? ` (parent: ${d.accountParentName})` : '';
       return `   - Opportunity: "${d.opportunityName}"${closed} | Account: ${d.accountName}${parent} | Opp Id: ${d.opportunityId}`;
     })
+    .join('\n');
+}
+
+function formatManualRelatedRecords(records) {
+  if (!records || !records.length) return '   (none yet — user has not pasted any URLs)';
+  return records
+    .slice(0, 50)
+    .map((r) => `   - ${r.type}: "${r.name}" (id: ${r.id})`)
     .join('\n');
 }
 

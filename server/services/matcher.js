@@ -180,8 +180,12 @@ function classifyDedupeMatch(calEvent, sfEvent) {
  * @param {Object} opts.config - the user config
  * @param {boolean} [opts.forceRefresh] - bypass calendar cache
  * @param {boolean} [opts.forceReclassify] - bypass classification cache, re-classify everything
+ * @param {boolean} [opts.cacheOnly] - skip claude entirely; events not in the classification
+ *                                     cache get status='unclassified'. Used by the auto-fire
+ *                                     on calendar navigation so the UI always has data
+ *                                     without paying for an LLM call.
  */
-export async function analyze({ fromIso, toIso, config, forceRefresh = false, forceReclassify = false }) {
+export async function analyze({ fromIso, toIso, config, forceRefresh = false, forceReclassify = false, cacheOnly = false }) {
   const errors = [];
   let calendarMeta = { fromCache: false, fetchedAt: null, backend: null };
   let classifyMeta = { cacheHits: 0, freshClassifications: 0 };
@@ -316,9 +320,18 @@ export async function analyze({ fromIso, toIso, config, forceRefresh = false, fo
     const hash = classCache.eventHash(ev);
     eventHashes.set(ev.id, hash);
     if (!forceReclassify) {
-      const cached = classCache.get(ev.id, hash);
+      // 1) Exact cache hit (same event id + same content hash)
+      let cached = classCache.get(ev.id, hash);
+      // 2) Recurring fallback: any prior instance of this recurring series
+      //    counts as the same activity — weekly syncs etc. get re-used without
+      //    going back to claude. The classification still applies to THIS event id.
+      if (!cached && ev.recurringEventId) {
+        const recurring = classCache.getRecurring(ev.recurringEventId);
+        if (recurring) {
+          cached = { ...recurring, eventId: ev.id, _fromRecurring: true };
+        }
+      }
       if (cached) {
-        // Tag so the frontend can filter by "freshly classified this run"
         cachedClassifications.push({ ...cached, _fromCache: true });
         continue;
       }
@@ -327,6 +340,28 @@ export async function analyze({ fromIso, toIso, config, forceRefresh = false, fo
   }
   classifyMeta.cacheHits = cachedClassifications.length;
   classifyMeta.freshClassifications = toClassify.length;
+  classifyMeta.cacheOnly = !!cacheOnly;
+
+  // In cacheOnly mode, skip claude entirely. Events not in cache become
+  // 'unclassified' synthetic classifications so the UI can render them as
+  // "not analyzed yet" placeholders. The user can hit Analyze normally to
+  // run claude on them later.
+  if (cacheOnly) {
+    classifyMeta.freshClassifications = 0; // we won't actually classify these
+    const unclassified = toClassify.map((e) => ({
+      eventId: e.id,
+      status: 'unclassified',
+      relatedTo: null,
+      seTaskType: null,
+      isCF: false,
+      isCR: false,
+      confidence: 'low',
+      reasoning: 'Not analyzed yet — hit Analyze to classify',
+    }));
+    // Inject into cachedClassifications so the merge below picks them up
+    cachedClassifications.push(...unclassified);
+    toClassify.length = 0;
+  }
 
   // 8) Build the slimmed-down event payload sent to Claude — ONLY events not in cache.
   const slimEvents = toClassify.map((e) => ({
@@ -359,6 +394,7 @@ export async function analyze({ fromIso, toIso, config, forceRefresh = false, fo
     const systemPrompt = buildMatchSystemPrompt({
       dcOpportunities,
       aliasTable: config.aliasTable || [],
+      manualRelatedRecords: config.manualRelatedRecords || [],
       taxonomyCorrections: config.taxonomyCorrections || [],
       excludedTitles: config.excludedTitles || [],
       internalEmailDomains: config.internalEmailDomains || ['salesforce.com'],
@@ -396,12 +432,18 @@ export async function analyze({ fromIso, toIso, config, forceRefresh = false, fo
 
     // Persist fresh classifications to cache for next analyze (BEFORE tagging
     // — the cache should hold the "clean" version without _fromCache flag).
+    // Include recurringEventId so subsequent instances of the same recurring
+    // series can hit the cache without going through claude.
+    const recurringByEventId = new Map(
+      toClassify.filter((e) => e.recurringEventId).map((e) => [e.id, e.recurringEventId])
+    );
     const cacheItems = fresh
       .filter((c) => c.eventId && eventHashes.has(c.eventId))
       .map((c) => ({
         eventId: c.eventId,
         hash: eventHashes.get(c.eventId),
         classification: c,
+        recurringEventId: recurringByEventId.get(c.eventId) || null,
       }));
     if (cacheItems.length) classCache.setMany(cacheItems);
 

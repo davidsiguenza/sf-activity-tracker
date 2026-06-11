@@ -395,6 +395,10 @@ function normalizeEvent(ev, userEmail, cal) {
     colorId: ev.colorId || '',
     attendees,
     htmlLink: ev.htmlLink || '',
+    // For recurring events Google returns a per-instance id PLUS a stable
+    // recurringEventId shared across all instances. We use it so classifying
+    // ONE instance auto-fills every other instance — weekly syncs etc.
+    recurringEventId: ev.recurringEventId || null,
     _calendarId: cal.id,
     _calendarName: cal.summary,
   };

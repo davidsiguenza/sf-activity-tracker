@@ -17,6 +17,7 @@ const GOOGLE_COLORS = {
 };
 
 const STATUS_PILLS = [
+  { key: 'unclassified',   label: 'Unclassified',   color: '#8c8c8c' },
   { key: 'identified',     label: 'To log',         color: '#0969da' },
   { key: 'already-logged', label: 'Already logged', color: '#57606a' },
   { key: 'flagged',        label: 'Flagged',        color: '#bf8700' },
@@ -207,6 +208,25 @@ function showApp() {
     btn.addEventListener('click', () => applyQuickRange(btn.dataset.range));
   });
 
+  // Manual date-picker edits sync the calendar to match. Auto-pick a view based
+  // on the range duration: 1 day → day view, 2-7 → week, >7 → month.
+  const onDateInputChange = () => {
+    const fromStr = document.getElementById('from-date').value;
+    const toStr = document.getElementById('to-date').value;
+    if (!fromStr || !toStr || !state.calendar) return;
+    const from = new Date(fromStr + 'T00:00:00');
+    const to = new Date(toStr + 'T00:00:00');
+    if (isNaN(from.getTime()) || isNaN(to.getTime())) return;
+    const dayCount = Math.round((to - from) / (24 * 60 * 60 * 1000)) + 1;
+    let view;
+    if (dayCount <= 1) view = 'timeGridDay';
+    else if (dayCount <= 7) view = 'timeGridWeek';
+    else view = 'dayGridMonth';
+    state.calendar.changeView(view, from);
+  };
+  document.getElementById('from-date').addEventListener('change', onDateInputChange);
+  document.getElementById('to-date').addEventListener('change', onDateInputChange);
+
   document.getElementById('analyze-btn').addEventListener('click', runAnalyze);
   document.getElementById('create-btn').addEventListener('click', runCreate);
   document.getElementById('settings-btn').addEventListener('click', openSettings);
@@ -226,7 +246,7 @@ function showApp() {
   selectAll.addEventListener('change', (e) => {
     for (const row of state.draftRows.values()) {
       const cls = row.classification;
-      if (['already-logged', 'excluded', 'skip'].includes(cls.status)) continue;
+      if (['already-logged', 'excluded', 'skip', 'unclassified'].includes(cls.status)) continue;
       if (row._visible === false) continue; // skip filtered-out rows
       row.selected = e.target.checked;
       // Sync green-ring on calendar
@@ -288,6 +308,7 @@ function showApp() {
   });
 
   initCalendar();
+  startCalendarPoller();
 
   // Auto-restore last analyzed range — only if recent (<24h) and the user
   // hasn't disabled it. The analyze hits the classification cache so it's
@@ -296,8 +317,40 @@ function showApp() {
   if (last) {
     document.getElementById('from-date').value = last.fromDate;
     document.getElementById('to-date').value = last.toDate;
-    // Defer one tick so the calendar finishes rendering first
-    setTimeout(() => runAnalyze(), 50);
+    // Defer one tick so the calendar finishes rendering, then sync calendar
+    // view to the restored range and trigger analyze.
+    setTimeout(() => {
+      onDateInputChange();
+      runAnalyze();
+    }, 50);
+  }
+}
+
+/**
+ * Given the FullCalendar datesSet arg (or a view), return the inclusive
+ * { from, to } date range the user is currently looking at:
+ *   - week view  → Monday → Sunday
+ *   - day view   → that single day on both ends
+ *   - month view → 1st of month → last of month (NOT the 35-42-day grid)
+ *   - list view  → same logic as the underlying view
+ *
+ * FullCalendar gives currentEnd as exclusive (e.g. for May, it's June 1) so we
+ * subtract one day to get an inclusive end suitable for the date picker UI.
+ */
+function calendarRangeToDates(arg) {
+  const view = arg.view || arg;
+  const from = new Date(view.currentStart);
+  const to = new Date(view.currentEnd);
+  to.setDate(to.getDate() - 1);
+  return { from, to };
+}
+
+/** Run a calendar mutation without echoing back into the date pickers. */
+function withoutDatePickerSync(fn) {
+  state._skipDatePickerSync = true;
+  try { fn(); } finally {
+    // Defer reset so the datesSet callback that fires from the mutation skips
+    setTimeout(() => { state._skipDatePickerSync = false; }, 0);
   }
 }
 
@@ -308,9 +361,26 @@ function initCalendar() {
     headerToolbar: { left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek' },
     height: 600,
     locale: 'es',
+    firstDay: 1, // Monday
     weekends: true,
     slotMinTime: '07:00',
     slotMaxTime: '21:00',
+    // Whenever the user navigates (prev/next/today), changes view, or programmatic
+    // gotoDate fires, sync the date-picker inputs so Analyze uses the visible range.
+    datesSet(arg) {
+      if (state._skipDatePickerSync) return;
+      const { from, to } = calendarRangeToDates(arg);
+      const fromInput = document.getElementById('from-date');
+      const toInput = document.getElementById('to-date');
+      if (fromInput && toInput) {
+        fromInput.value = isoDate(from);
+        toInput.value = isoDate(to);
+      }
+      // Auto-fire a cache-only analyze for the new range so the user always
+      // sees data when navigating, even without hitting Analyze. Debounced so
+      // rapid scrolling through weeks doesn't hammer the backend.
+      scheduleCacheOnlyFetch(from, to);
+    },
     eventClassNames(arg) {
       const classes = [...(arg.event.extendedProps.classes || [])];
       if (state.selectedEventId === arg.event.id) classes.push('event-selected');
@@ -390,20 +460,123 @@ function selectEvent(eventId, opts = {}) {
 
 function applyQuickRange(range) {
   const today = new Date();
-  let from, to;
+  let view = null;     // FullCalendar view name to switch to
+  let target = null;   // Date to navigate the calendar to
+
   switch (range) {
-    case 'today': from = today; to = today; break;
-    case 'yesterday': from = addDays(today, -1); to = addDays(today, -1); break;
-    case 'thisweek': from = startOfWeek(today); to = addDays(from, 6); break;
-    case 'lastweek': from = addDays(startOfWeek(today), -7); to = addDays(from, 6); break;
-    case 'thismonth': from = new Date(today.getFullYear(), today.getMonth(), 1); to = new Date(today.getFullYear(), today.getMonth() + 1, 0); break;
+    case 'today':     view = 'timeGridDay';   target = today; break;
+    case 'yesterday': view = 'timeGridDay';   target = addDays(today, -1); break;
+    case 'thisweek':  view = 'timeGridWeek';  target = today; break;
+    case 'lastweek':  view = 'timeGridWeek';  target = addDays(today, -7); break;
+    case 'thismonth': view = 'dayGridMonth';  target = today; break;
     default: return;
   }
-  document.getElementById('from-date').value = isoDate(from);
-  document.getElementById('to-date').value = isoDate(to);
+
+  // Both the view-change and the gotoDate fire datesSet, which will sync the
+  // pickers — no need to set the inputs manually here.
+  if (state.calendar) {
+    state.calendar.changeView(view, target);
+  } else {
+    // Calendar not ready yet (shouldn't happen post-init): fall back to inputs
+    const { from, to } = quickRangeToDates(range);
+    document.getElementById('from-date').value = isoDate(from);
+    document.getElementById('to-date').value = isoDate(to);
+  }
+}
+
+/** Plain {from,to} for a quick-range key — used as a fallback if the calendar isn't initialised. */
+function quickRangeToDates(range) {
+  const today = new Date();
+  switch (range) {
+    case 'today':     return { from: today, to: today };
+    case 'yesterday': { const d = addDays(today, -1); return { from: d, to: d }; }
+    case 'thisweek':  { const f = startOfWeek(today); return { from: f, to: addDays(f, 6) }; }
+    case 'lastweek':  { const f = addDays(startOfWeek(today), -7); return { from: f, to: addDays(f, 6) }; }
+    case 'thismonth': return { from: new Date(today.getFullYear(), today.getMonth(), 1), to: new Date(today.getFullYear(), today.getMonth() + 1, 0) };
+  }
+  return { from: today, to: today };
 }
 
 // ─── Analyze ──────────────────────────────────────────────────────────────────
+
+// ─── Cache-only auto-fetch on calendar navigation ────────────────────────────
+
+let _cacheOnlyTimer = null;
+let _calendarPollerId = null;
+const POLL_INTERVAL_MS = 60_000; // 1 minute
+// Initialized lazily on the state object so the in-flight guard survives
+state._cacheOnlyReqCounter = 0;
+
+/**
+ * Start a 1-minute poller that re-fetches Google Calendar for whatever range
+ * the calendar is currently showing. Picks up new events the user added in
+ * Google without needing to navigate or hit Analyze. Pauses while the tab
+ * is hidden so we don't burn quota on a window the user isn't looking at.
+ */
+function startCalendarPoller() {
+  if (_calendarPollerId) clearInterval(_calendarPollerId);
+  _calendarPollerId = setInterval(() => {
+    if (document.hidden) return;
+    if (!state.calendar) return;
+    if (state._analyzeInFlight) return;
+    const view = state.calendar.view;
+    const { from, to } = calendarRangeToDates(view);
+    doCacheOnlyFetch(from, to);
+  }, POLL_INTERVAL_MS);
+  // Also fetch right away when the tab becomes visible after being hidden
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden || !state.calendar || state._analyzeInFlight) return;
+    const view = state.calendar.view;
+    const { from, to } = calendarRangeToDates(view);
+    doCacheOnlyFetch(from, to);
+  });
+}
+
+/**
+ * Debounced cache-only fetch. Triggered on every calendar navigation so the
+ * user always sees data without waiting for claude. Reuses the analyze flow
+ * with cacheOnly=true: server fetches calendar (fast Google API) + looks up
+ * classifications cache + builds dedupes. Events not in cache come back as
+ * status='unclassified' (gray dashed). User explicitly hits Analyze to run
+ * claude on them.
+ */
+function scheduleCacheOnlyFetch(from, to) {
+  if (!state.config) return; // setup wizard still pending
+  // Skip if range is too long — would require fetching too many events
+  const days = Math.round((to - from) / (24 * 60 * 60 * 1000)) + 1;
+  if (days > 45) return;
+  // Skip if a full Analyze is in flight — let it finish; its result is fresher
+  if (state._analyzeInFlight) return;
+
+  clearTimeout(_cacheOnlyTimer);
+  _cacheOnlyTimer = setTimeout(() => doCacheOnlyFetch(from, to), 600);
+}
+
+async function doCacheOnlyFetch(from, to) {
+  const fromIso = `${isoDate(from)}T00:00:00`;
+  const toIso = `${isoDate(to)}T23:59:59`;
+  // Tag this request so a stale response doesn't pisar what's now visible
+  const reqId = ++state._cacheOnlyReqCounter;
+  try {
+    // forceRefresh: true → always re-fetch from Google so the user sees
+    // newly-added calendar events without waiting for the 30-min cache to expire.
+    // Google Calendar API is ~500ms so this is fine on every nav / poll.
+    const result = await fetchJson('/api/analyze', {
+      method: 'POST',
+      body: { fromIso, toIso, cacheOnly: true, forceRefresh: true },
+    });
+    // If user navigated again while the request was in flight, drop this response
+    if (reqId !== state._cacheOnlyReqCounter) return;
+    state.events = result.events || [];
+    state.classifications = result.classifications || [];
+    state.dcOpportunities = result.dcOpportunities || [];
+    state.unmatchedSfEvents = result.unmatchedSfEvents || [];
+    renderResults(result);
+  } catch (e) {
+    // Silent failure — the user can hit Analyze manually
+    console.warn('cacheOnly fetch failed:', e.message);
+  }
+}
 
 async function runAnalyze() {
   const fromDate = document.getElementById('from-date').value;
@@ -422,6 +595,7 @@ async function runAnalyze() {
     : forceRefresh
     ? '⏳ Refreshing from Google…'
     : '⏳ Analyzing…';
+  state._analyzeInFlight = true;
 
   try {
     const result = await fetchJson('/api/analyze', {
@@ -443,6 +617,7 @@ async function runAnalyze() {
   } finally {
     btn.disabled = false;
     btn.textContent = '▶ Analyze';
+    state._analyzeInFlight = false;
   }
 }
 
@@ -450,8 +625,9 @@ function renderResults(result) {
   const s = result.summary || { counts: {}, cfHours: 0, crHours: 0 };
   document.getElementById('summary-bar').classList.remove('hidden');
   const skipped = (s.counts.skip || 0) + (s.counts.excluded || 0);
-  paintChip('chip-fresh',      `${s.counts.fresh || 0} new`,                   (s.counts.fresh || 0) > 0);
-  paintChip('chip-identified', `${s.counts.identified || 0} to log`,           (s.counts.identified || 0) > 0);
+  paintChip('chip-fresh',        `${s.counts.fresh || 0} new`,                   (s.counts.fresh || 0) > 0);
+  paintChip('chip-unclassified', `${s.counts.unclassified || 0} unclassified`,   (s.counts.unclassified || 0) > 0);
+  paintChip('chip-identified',   `${s.counts.identified || 0} to log`,           (s.counts.identified || 0) > 0);
   paintChip('chip-logged',     `${s.counts.alreadyLogged || 0} already logged`, (s.counts.alreadyLogged || 0) > 0);
   paintChip('chip-flagged',    `${s.counts.flagged || 0} flagged`,              (s.counts.flagged || 0) > 0);
   paintChip('chip-skipped',    `${skipped} skipped`,                            skipped > 0);
@@ -519,6 +695,7 @@ function renderResults(result) {
     // user sees the duplicate-detection signal immediately on the calendar.
     let cssClass;
     if (status === 'already-logged') cssClass = 'event-logged';
+    else if (status === 'unclassified') cssClass = 'event-unclassified';
     else if (cls?._dedupeMatch?.type === 'probably-logged') cssClass = 'event-probably-logged';
     else cssClass = `event-${status}`;
 
@@ -554,11 +731,16 @@ function renderResults(result) {
       },
     });
   }
-  if (state.events.length) state.calendar.gotoDate(new Date(state.events[0].start));
+  // Only re-position the calendar on a manual Analyze. cacheOnly fetches are
+  // triggered BY calendar navigation, so we're already on the right date —
+  // calling gotoDate here would yank the user back to whatever events[0].start
+  // resolves to, causing visible jitter when scrolling fast.
+  if (state.events.length && !result.classifyMeta?.cacheOnly) {
+    state.calendar.gotoDate(new Date(state.events[0].start));
+  }
 
-  // Show filter panel and rebuild its pills based on the data we just got
+  // Show the filter panel — pills get built AFTER draftRows is populated below
   document.getElementById('filter-panel').classList.remove('hidden');
-  rebuildFilterPills();
 
   state.draftRows.clear();
   for (const ev of state.events) {
@@ -571,6 +753,10 @@ function renderResults(result) {
     });
   }
   state.selectedEventId = null;
+
+  // Build filter pills now that draftRows is populated, then render the table.
+  // (rebuildFilterPills reads from state.draftRows, so order matters here.)
+  rebuildFilterPills();
   renderDraftPlan();
 }
 
@@ -825,7 +1011,7 @@ function syncSelectAllCheckbox() {
   // Only count rows that (a) are selectable by status AND (b) are currently visible.
   // The checkbox should answer: "are all currently-visible selectable rows ticked?"
   const selectable = [...state.draftRows.values()].filter((r) => {
-    if (['already-logged', 'excluded', 'skip'].includes(r.classification.status)) return false;
+    if (['already-logged', 'excluded', 'skip', 'unclassified'].includes(r.classification.status)) return false;
     if (r._visible === false) return false;
     return true;
   });
@@ -855,7 +1041,7 @@ function buildDraftRow(row) {
   const cb = document.createElement('input');
   cb.type = 'checkbox';
   cb.checked = row.selected;
-  cb.disabled = ['already-logged', 'excluded', 'skip'].includes(cls.status);
+  cb.disabled = ['already-logged', 'excluded', 'skip', 'unclassified'].includes(cls.status);
   cb.addEventListener('change', () => {
     row.selected = cb.checked;
     refreshCreateBtn();
@@ -1135,7 +1321,7 @@ function buildConfidenceCell(c) {
 
 function buildTaskTypeCell(row) {
   const cls = row.classification;
-  if (['already-logged', 'excluded', 'skip'].includes(cls.status)) return td(em('—'));
+  if (['already-logged', 'excluded', 'skip', 'unclassified'].includes(cls.status)) return td(em('—'));
 
   const select = document.createElement('select');
   for (const t of SE_TASK_TYPES) {
@@ -1309,7 +1495,7 @@ function markEventLogged(eventId) {
  * Recompute the summary chip counts from current state (after creations).
  */
 function updateSummaryChips() {
-  const counts = { identified: 0, alreadyLogged: 0, flagged: 0, skip: 0, excluded: 0, fresh: 0 };
+  const counts = { identified: 0, alreadyLogged: 0, flagged: 0, skip: 0, excluded: 0, unclassified: 0, fresh: 0 };
   let cfHours = 0;
   let crHours = 0;
   for (const row of state.draftRows.values()) {
@@ -1324,8 +1510,9 @@ function updateSummaryChips() {
     }
   }
   const skippedTotal = counts.skip + counts.excluded;
-  paintChip('chip-fresh',      `${counts.fresh} new`,                    counts.fresh > 0);
-  paintChip('chip-identified', `${counts.identified} to log`,           counts.identified > 0);
+  paintChip('chip-fresh',        `${counts.fresh} new`,                    counts.fresh > 0);
+  paintChip('chip-unclassified', `${counts.unclassified} unclassified`,    counts.unclassified > 0);
+  paintChip('chip-identified',   `${counts.identified} to log`,           counts.identified > 0);
   paintChip('chip-logged',     `${counts.alreadyLogged} already logged`, counts.alreadyLogged > 0);
   paintChip('chip-flagged',    `${counts.flagged} flagged`,              counts.flagged > 0);
   paintChip('chip-skipped',    `${skippedTotal} skipped`,                skippedTotal > 0);

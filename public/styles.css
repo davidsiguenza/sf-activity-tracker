@@ -161,6 +161,7 @@ textarea { font-family: inherit; }
 .chip-cf { background: #dcffe4; border-color: #2da44e; color: #1a7f37; }
 .chip-cr { background: #ddf4ff; border-color: #54aeff; color: #0969da; }
 .chip-new { background: #fbefff; border-color: #c297ff; color: #8250df; }
+.chip-unclassified { background: #f6f8fa; border-color: #afb8c1; color: #57606a; }
 
 .errors-bar {
   background: #ffebe9; border: 1px solid #ff8182; color: #82071e;
@@ -290,6 +291,18 @@ textarea { font-family: inherit; }
   top: 1px; right: 3px;
   font-size: 10px;
   pointer-events: none;
+}
+
+/* UNCLASSIFIED — fetched from calendar but not yet processed by claude.
+ * Plain dashed gray box so the user knows they exist but haven't been
+ * categorised. Hitting Analyze classifies them. */
+.fc-event.event-unclassified {
+  background: #f6f8fa !important;
+  border: 1px dashed #afb8c1 !important;
+}
+.fc-event.event-unclassified .fc-event-title,
+.fc-event.event-unclassified .fc-event-time {
+  color: #6e7781 !important;
 }
 
 /* SF-ONLY ghost — events logged in org62 with no matching calendar entry.

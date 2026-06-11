@@ -38,7 +38,7 @@ function ensureDir() {
 }
 
 function emptyStore() {
-  return { version: CURRENT_VERSION, entries: {} };
+  return { version: CURRENT_VERSION, entries: {}, recurring: {} };
 }
 
 function load() {
@@ -47,6 +47,8 @@ function load() {
     const data = JSON.parse(readFileSync(CACHE_PATH, 'utf8'));
     if (data.version !== CURRENT_VERSION) return emptyStore(); // schema bump → discard
     if (!data.entries || typeof data.entries !== 'object') return emptyStore();
+    // recurring map was added later — backfill so old caches keep working
+    if (!data.recurring || typeof data.recurring !== 'object') data.recurring = {};
     return data;
   } catch {
     return emptyStore();
@@ -101,7 +103,7 @@ export function set(eventId, hash, classification) {
 
 /**
  * Save multiple classifications atomically (single file write).
- * @param {Array<{eventId, hash, classification}>} items
+ * @param {Array<{eventId, hash, classification, recurringEventId?}>} items
  */
 export function setMany(items) {
   if (!items || !items.length) return;
@@ -114,8 +116,28 @@ export function setMany(items) {
       classification: it.classification,
       classifiedAt: now,
     };
+    // Recurring fallback: store one entry per recurring series so future
+    // instances of "weekly Iberia sync" etc don't go to claude again
+    if (it.recurringEventId) {
+      store.recurring[it.recurringEventId] = {
+        classification: it.classification,
+        classifiedAt: now,
+      };
+    }
   }
   persist(store);
+}
+
+/**
+ * Lookup a classification by recurringEventId — used as a fallback when the
+ * exact (eventId + hash) cache misses. Any prior instance of this recurring
+ * series is re-used.
+ */
+export function getRecurring(recurringEventId) {
+  if (!recurringEventId) return null;
+  const store = load();
+  const entry = store.recurring[recurringEventId];
+  return entry?.classification || null;
 }
 
 /**
@@ -129,6 +151,12 @@ export function prune() {
   for (const [id, entry] of Object.entries(store.entries)) {
     if ((entry.classifiedAt || 0) < cutoff) {
       delete store.entries[id];
+      pruned++;
+    }
+  }
+  for (const [id, entry] of Object.entries(store.recurring || {})) {
+    if ((entry.classifiedAt || 0) < cutoff) {
+      delete store.recurring[id];
       pruned++;
     }
   }
