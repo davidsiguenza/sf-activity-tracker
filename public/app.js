@@ -40,6 +40,7 @@ const state = {
     text: '',
     statuses: new Set(), // empty = no status filter
     colors: new Set(),   // empty = no color filter (colorId strings; '' = "no color")
+    calendars: new Set(),// empty = no calendar filter (calendarId strings)
     cfOnly: false,       // true = only events with isCF
     crOnly: false,       // true = only events with isCR
     freshOnly: false,    // true = only events freshly classified this run (not from cache)
@@ -293,6 +294,7 @@ function showApp() {
     state.filters.text = '';
     state.filters.statuses.clear();
     state.filters.colors.clear();
+    state.filters.calendars.clear();
     state.filters.cfOnly = false;
     state.filters.crOnly = false;
     state.filters.freshOnly = false;
@@ -837,6 +839,11 @@ function isRowVisible(row) {
     if (!state.filters.colors.has(c)) return false;
   }
 
+  // 3b. Calendar filter — empty set = no filter
+  if (state.filters.calendars.size > 0) {
+    if (!state.filters.calendars.has(ev._calendarId || '')) return false;
+  }
+
   // 4. Text filter — checks title and description
   if (state.filters.text) {
     const haystack = ((ev.summary || '') + ' ' + (ev.description || '')).toLowerCase();
@@ -995,6 +1002,48 @@ function rebuildFilterPills() {
     if (state.filters.colors.has('')) pill.classList.add('is-on');
     colorGroup.appendChild(pill);
   }
+
+  // CALENDAR pills — only render the group if more than one calendar is in view.
+  // Events fetched via the Claude fallback don't carry _calendarId, so we treat
+  // missing as a single bucket — the group simply won't appear.
+  const calendarMap = new Map(); // id → name
+  for (const row of state.draftRows.values()) {
+    const id = row.event._calendarId;
+    if (!id) continue;
+    if (!calendarMap.has(id)) calendarMap.set(id, row.event._calendarName || id);
+  }
+  const calendarGroup = document.getElementById('filter-calendar-group');
+  while (calendarGroup.children.length > 1) calendarGroup.removeChild(calendarGroup.lastChild);
+
+  if (calendarMap.size <= 1) {
+    calendarGroup.style.display = 'none';
+    // Drop any stale calendar filter so it doesn't silently hide everything next time
+    state.filters.calendars.clear();
+    return;
+  }
+  calendarGroup.style.display = '';
+
+  const orderedCals = [...calendarMap.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  for (const [id, name] of orderedCals) {
+    const pill = makeCalendarPill(id, name);
+    if (state.filters.calendars.has(id)) pill.classList.add('is-on');
+    calendarGroup.appendChild(pill);
+  }
+}
+
+function makeCalendarPill(id, name) {
+  const pill = document.createElement('span');
+  pill.className = 'filter-pill';
+  pill.dataset.calendarId = id;
+  pill.appendChild(document.createTextNode(name));
+  pill.title = id;
+  pill.addEventListener('click', () => {
+    if (state.filters.calendars.has(id)) state.filters.calendars.delete(id);
+    else state.filters.calendars.add(id);
+    pill.classList.toggle('is-on');
+    applyAllFilters();
+  });
+  return pill;
 }
 
 function makeColorPill(cid, hex, name) {
