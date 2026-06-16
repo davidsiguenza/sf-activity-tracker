@@ -123,7 +123,10 @@ Wellness</textarea>
       <div id="draft-plan-card" class="card hidden">
         <div class="draft-header">
           <h2>Draft plan</h2>
-          <button id="create-btn" class="btn btn-success" disabled>Create in org62</button>
+          <div style="display: flex; gap: 8px;">
+            <button id="export-btn" class="btn btn-ghost" disabled title="Descarga la selección como JSON (backup o re-upload manual si org62 falla)">📥 Export JSON</button>
+            <button id="create-btn" class="btn btn-success" disabled>Create in org62</button>
+          </div>
         </div>
         <table id="draft-plan-table">
           <thead>

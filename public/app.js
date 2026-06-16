@@ -270,6 +270,7 @@ function showApp() {
 
   document.getElementById('analyze-btn').addEventListener('click', runAnalyze);
   document.getElementById('create-btn').addEventListener('click', runCreate);
+  document.getElementById('export-btn').addEventListener('click', exportSelection);
   document.getElementById('settings-btn').addEventListener('click', openSettings);
   document.getElementById('settings-close').addEventListener('click', closeSettings);
   document.getElementById('help-btn').addEventListener('click', () => {
@@ -1500,16 +1501,26 @@ function truncate(s, n) {
 }
 
 function refreshCreateBtn() {
-  const btn = document.getElementById('create-btn');
+  const createBtn = document.getElementById('create-btn');
+  const exportBtn = document.getElementById('export-btn');
   const count = [...state.draftRows.values()].filter((r) => r.selected).length;
-  btn.disabled = count === 0;
-  btn.textContent = count === 0 ? 'Create in org62' : `Create ${count} in org62`;
+  createBtn.disabled = count === 0;
+  createBtn.textContent = count === 0 ? 'Create in org62' : `Create ${count} in org62`;
+  if (exportBtn) {
+    exportBtn.disabled = count === 0;
+    exportBtn.textContent = count === 0 ? '📥 Export JSON' : `📥 Export JSON (${count})`;
+  }
   syncSelectAllCheckbox();
 }
 
 // ─── Create ───────────────────────────────────────────────────────────────────
 
-async function runCreate() {
+/**
+ * Build the array of items ready to be written to org62 from the currently
+ * selected draft rows. Pure function — no side effects, used by both runCreate
+ * (POST) and exportSelection (download as JSON).
+ */
+function buildApproved() {
   const approved = [];
   for (const row of state.draftRows.values()) {
     if (!row.selected) continue;
@@ -1524,6 +1535,10 @@ async function runCreate() {
       startUtc: new Date(row.event.start).toISOString(),
       endUtc: new Date(row.event.end).toISOString(),
       whatId: cls.relatedTo?.id || null,
+      // Human-readable mirrors of whatId / dcOpportunityId — not sent to /api/create
+      // but useful for someone reviewing the JSON or re-importing manually.
+      relatedToName: cls.relatedTo?.name || null,
+      relatedToType: cls.relatedTo?.type || null,
       seTaskType: cls.seTaskType,
       isCF: cls.isCF,
       isCR: cls.isCR,
@@ -1532,6 +1547,54 @@ async function runCreate() {
       splitPercentage: 100,
     });
   }
+  return approved;
+}
+
+/**
+ * Strip presentation-only fields before POSTing to /api/create. Server only
+ * reads the canonical payload — extra fields would be ignored but make the
+ * request larger.
+ */
+function stripForApi(approved) {
+  return approved.map(({ relatedToName, relatedToType, ...rest }) => rest);
+}
+
+/**
+ * Download the current selection as a JSON file. Used as a backup mechanism
+ * when org62 writes fail and the user wants to re-upload via another method.
+ */
+function exportSelection() {
+  const approved = buildApproved();
+  if (approved.length === 0) return;
+
+  const payload = {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    se: state.config ? {
+      userId: state.config.seUserId,
+      name: state.config.seName,
+      email: state.config.seEmail,
+      opportunityRole: state.config.seOpportunityRole,
+    } : null,
+    count: approved.length,
+    approved,
+  };
+
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  // Local time in the filename so the user sees a familiar timestamp
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 16); // YYYY-MM-DDTHH-MM
+  a.href = url;
+  a.download = `sf-activity-tracker-selection-${stamp}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function runCreate() {
+  const approved = buildApproved();
   if (approved.length === 0) return;
 
   document.getElementById('progress-card').classList.remove('hidden');
@@ -1539,7 +1602,7 @@ async function runCreate() {
   log.replaceChildren();
 
   try {
-    await sse('/api/create', { approved }, (event, data) => {
+    await sse('/api/create', { approved: stripForApi(approved) }, (event, data) => {
       switch (event) {
         case 'phase':
           appendLog(`▶ ${data.name} (${data.total})`);
