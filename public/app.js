@@ -1730,6 +1730,9 @@ async function openSettings() {
     idDisplay.appendChild(text('.'));
   }
 
+  // SF MCP backend (Fase 1) — load current state into the form
+  await refreshSfMcpSection();
+
   // Activate the last-used tab (or default to "calendar")
   const lastTab = localStorage.getItem('sfat:settingsTab') || 'calendar';
   switchSettingsTab(lastTab);
@@ -1783,6 +1786,103 @@ async function openSettings() {
 function closeSettings() {
   document.getElementById('settings-modal').classList.add('hidden');
 }
+
+// ─── SF MCP backend (Fase 1: config + OAuth + tools/list test) ──────────────
+
+async function refreshSfMcpSection() {
+  try {
+    const r = await fetchJson('/api/sf-mcp/config');
+    document.getElementById('sf-mcp-client-id').value = r.clientId || '';
+    document.getElementById('sf-mcp-callback-port').value = r.callbackPort || 8082;
+    paintSfMcpStatus(r);
+  } catch (e) {
+    document.getElementById('sf-mcp-status').textContent = `Error: ${e.message}`;
+  }
+}
+
+function paintSfMcpStatus(s) {
+  const el = document.getElementById('sf-mcp-status');
+  if (!el) return;
+  if (!s.clientId) {
+    el.innerHTML = '<span style="color: var(--muted);">Sin clientId — pega tu Connected App clientId y guarda.</span>';
+  } else if (!s.hasTokens) {
+    el.innerHTML = '<span style="color: var(--muted);">clientId guardado · no conectado todavía. Pulsa Connect via OAuth.</span>';
+  } else {
+    const exp = s.expiresAt ? new Date(s.expiresAt).toLocaleString() : 'desconocido';
+    el.innerHTML = `<span style="color: #047857;">✓ Conectado</span> · scope: <code>${s.scope || '?'}</code> · access_token expira: ${exp}`;
+  }
+}
+
+async function saveSfMcpConfig() {
+  const clientId = document.getElementById('sf-mcp-client-id').value.trim();
+  const callbackPort = parseInt(document.getElementById('sf-mcp-callback-port').value, 10);
+  showSfMcpOutput('Guardando…');
+  try {
+    await fetchJson('/api/sf-mcp/config', {
+      method: 'PUT',
+      body: { clientId: clientId || null, callbackPort: Number.isInteger(callbackPort) ? callbackPort : 8082 },
+    });
+    await refreshSfMcpSection();
+    showSfMcpOutput('✓ Config guardada.');
+  } catch (e) {
+    showSfMcpOutput(`✗ ${e.message}`);
+  }
+}
+
+async function connectSfMcp() {
+  showSfMcpOutput('Abriendo browser para OAuth… completa el login y vuelve aquí.');
+  try {
+    const r = await fetchJson('/api/sf-mcp/oauth/start', { method: 'POST' });
+    if (r.ok) {
+      await refreshSfMcpSection();
+      showSfMcpOutput('✓ Conectado. Ahora pulsa "Test (tools/list)" para descubrir las tools que expone el server.');
+    } else {
+      showSfMcpOutput(`✗ ${r.error || 'Error desconocido'}`);
+    }
+  } catch (e) {
+    showSfMcpOutput(`✗ ${e.message}`);
+  }
+}
+
+async function testSfMcp() {
+  showSfMcpOutput('Llamando tools/list a reads + mutations…');
+  try {
+    const r = await fetchJson('/api/sf-mcp/test', { method: 'POST' });
+    showSfMcpOutput(JSON.stringify(r, null, 2));
+  } catch (e) {
+    showSfMcpOutput(`✗ ${e.message}`);
+  }
+}
+
+async function disconnectSfMcp() {
+  if (!confirm('¿Borrar tokens MCP? Tendrás que reconectar la próxima vez.')) return;
+  try {
+    await fetchJson('/api/sf-mcp/oauth/disconnect', { method: 'POST' });
+    await refreshSfMcpSection();
+    showSfMcpOutput('✓ Tokens borrados.');
+  } catch (e) {
+    showSfMcpOutput(`✗ ${e.message}`);
+  }
+}
+
+function showSfMcpOutput(text) {
+  const el = document.getElementById('sf-mcp-output');
+  if (!el) return;
+  el.style.display = 'block';
+  el.textContent = text;
+}
+
+// Wire buttons once at DOM ready (the modal is in the DOM from the start).
+document.addEventListener('DOMContentLoaded', () => {
+  const wire = (id, fn) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('click', fn);
+  };
+  wire('sf-mcp-save-btn', saveSfMcpConfig);
+  wire('sf-mcp-connect-btn', connectSfMcp);
+  wire('sf-mcp-test-btn', testSfMcp);
+  wire('sf-mcp-disconnect-btn', disconnectSfMcp);
+});
 
 /**
  * Switch the active tab in the Settings modal. Persists to localStorage so the

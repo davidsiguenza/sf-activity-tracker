@@ -316,6 +316,28 @@ Wellness</textarea>
         <h3>Identidad</h3>
         <p class="hint" id="account-identity-display">Cargando…</p>
       </section>
+
+      <section id="sf-mcp-section">
+        <h3>Backend Salesforce — MCP (experimental)</h3>
+        <p class="hint">Alternativa al <code>sf</code> CLI: lee/escribe en org62 vía los endpoints MCP HTTP de Salesforce, autenticando por OAuth interactivo (sin tokens estáticos). Útil si tu CLI tiene la auth rota pero el OAuth web sí funciona.</p>
+        <p class="hint" style="margin-top: 4px;"><b>Estado:</b> Fase 1 — solo conexión y discovery. El router CLI/MCP llega en la Fase 3.</p>
+
+        <div id="sf-mcp-status" class="hint" style="margin: 8px 0;">Comprobando…</div>
+
+        <label>Connected App clientId (público, PKCE — sin secret)
+          <input type="text" id="sf-mcp-client-id" placeholder="3MVG9..." style="font-family: monospace; font-size: 11px;" />
+        </label>
+        <label>Callback port (puerto local libre — debe estar en los Redirect URIs de la Connected App)
+          <input type="number" id="sf-mcp-callback-port" min="1024" max="65535" />
+        </label>
+        <div style="margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap;">
+          <button class="btn btn-primary" id="sf-mcp-save-btn">Save config</button>
+          <button class="btn btn-success" id="sf-mcp-connect-btn">⚡ Connect via OAuth</button>
+          <button class="btn btn-ghost" id="sf-mcp-test-btn">Test (tools/list)</button>
+          <button class="btn btn-ghost" id="sf-mcp-disconnect-btn">Disconnect</button>
+        </div>
+        <pre id="sf-mcp-output" class="hint" style="margin-top: 8px; max-height: 240px; overflow: auto; display: none;"></pre>
+      </section>
       <section>
         <h3>Excluded titles</h3>
         <p class="hint">Eventos cuyo título coincida con cualquiera de estos NUNCA se loguean.</p>

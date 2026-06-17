@@ -10,6 +10,7 @@ import * as oauthRoute from './oauth.js';
 import * as cacheRoute from './cache.js';
 import * as overridesRoute from './overrides.js';
 import * as sfRoute from './sf.js';
+import * as sfMcpRoute from './sf-mcp.js';
 
 const ROUTES = [
   { method: 'GET', path: '/api/health', handler: healthRoute.get },
@@ -45,6 +46,13 @@ const ROUTES = [
   { method: 'GET',  path: '/api/override/stats', handler: overridesRoute.stats },
   // Salesforce instance metadata (for "Open in Salesforce" record links)
   { method: 'GET',  path: '/api/sf/instance-url', handler: sfRoute.instanceUrl },
+  // Salesforce MCP backend — Fase 1 (config + OAuth + tools/list test)
+  { method: 'GET',  path: '/api/sf-mcp/config',           handler: sfMcpRoute.getConfigHandler },
+  { method: 'PUT',  path: '/api/sf-mcp/config',           handler: sfMcpRoute.putConfigHandler },
+  { method: 'GET',  path: '/api/sf-mcp/status',           handler: sfMcpRoute.statusHandler },
+  { method: 'POST', path: '/api/sf-mcp/oauth/start',      handler: sfMcpRoute.oauthStartHandler },
+  { method: 'POST', path: '/api/sf-mcp/oauth/disconnect', handler: sfMcpRoute.oauthDisconnectHandler },
+  { method: 'POST', path: '/api/sf-mcp/test',             handler: sfMcpRoute.testHandler },
 ];
 
 export function match(method, path) {
