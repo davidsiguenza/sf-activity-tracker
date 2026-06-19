@@ -327,9 +327,21 @@ Wellness</textarea>
         <label>Connected App clientId (público, PKCE — sin secret)
           <input type="text" id="sf-mcp-client-id" placeholder="3MVG9..." style="font-family: monospace; font-size: 11px;" />
         </label>
-        <label>Callback port (puerto local libre — debe estar en los Redirect URIs de la Connected App)
-          <input type="number" id="sf-mcp-callback-port" min="1024" max="65535" />
-        </label>
+        <div style="display: flex; gap: 8px;">
+          <label style="flex: 1;">Redirect host
+            <input type="text" id="sf-mcp-redirect-host" placeholder="localhost" />
+          </label>
+          <label style="flex: 1;">Callback port
+            <input type="number" id="sf-mcp-callback-port" min="1024" max="65535" />
+          </label>
+          <label style="flex: 2;">Redirect path
+            <input type="text" id="sf-mcp-redirect-path" placeholder="/oauth/callback" />
+          </label>
+        </div>
+        <p class="hint" style="margin-top: 4px;">
+          <b>Redirect URI a registrar en la Connected App:</b> <code id="sf-mcp-redirect-uri-display" style="user-select: all;">—</code>
+          <br>Setup → App Manager → tu Connected App → Edit → "API (Enable OAuth Settings)" → Callback URL. Debe coincidir exactamente.
+        </p>
         <div style="margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap;">
           <button class="btn btn-primary" id="sf-mcp-save-btn">Save config</button>
           <button class="btn btn-success" id="sf-mcp-connect-btn">⚡ Connect via OAuth</button>

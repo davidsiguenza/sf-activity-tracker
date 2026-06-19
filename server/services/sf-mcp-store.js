@@ -26,8 +26,13 @@ const DEFAULT_DISCOVERY_HOST = 'https://api.salesforce.com';
 const DEFAULT_CONFIG = {
   clientId: null,                       // Connected App client_id (public, PKCE)
   callbackPort: 8082,                   // local port for the OAuth callback
+  // The full redirect_uri is built as `http://${redirectHost}:${callbackPort}${redirectPath}`.
+  // It MUST exactly match one of the Connected App's Callback URLs in Salesforce
+  // (Setup → App Manager → Edit → API (Enable OAuth Settings) → Callback URL).
+  redirectHost: 'localhost',
+  redirectPath: '/callback',            // path Claude Code uses; the SF Platform MCP Connected App accepts it
   discoveryHost: DEFAULT_DISCOVERY_HOST, // host where /.well-known lives
-  scopes: ['api', 'refresh_token'],     // negotiated by discovery — these are fallbacks
+  scopes: ['mcp_api', 'refresh_token'], // SF Platform MCP requires `mcp_api`, NOT plain `api`
   endpoints: {
     reads:     'https://api.salesforce.com/platform/mcp/v1/platform/sobject-reads',
     mutations: 'https://api.salesforce.com/platform/mcp/v1/platform/sobject-mutations',

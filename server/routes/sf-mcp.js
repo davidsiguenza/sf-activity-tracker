@@ -13,11 +13,18 @@ import { runAuthFlow } from '../services/sf-mcp-oauth.js';
 import * as store from '../services/sf-mcp-store.js';
 import { listReadsTools, listMutationsTools } from '../services/sf-mcp-client.js';
 
+function computeRedirectUri(cfg) {
+  return `http://${cfg.redirectHost || 'localhost'}:${cfg.callbackPort}${cfg.redirectPath || '/oauth/callback'}`;
+}
+
 export async function getConfigHandler({ sendJson, res }) {
   const cfg = store.getConfig();
   sendJson(res, 200, {
     clientId: cfg.clientId,
     callbackPort: cfg.callbackPort,
+    redirectHost: cfg.redirectHost,
+    redirectPath: cfg.redirectPath,
+    redirectUri: computeRedirectUri(cfg), // computed for convenience — register THIS in the Connected App
     discoveryHost: cfg.discoveryHost,
     scopes: cfg.scopes,
     endpoints: cfg.endpoints,
@@ -32,11 +39,13 @@ export async function putConfigHandler({ body, sendJson, res }) {
   const allowed = {};
   if (typeof body.clientId === 'string')      allowed.clientId = body.clientId.trim() || null;
   if (Number.isInteger(body.callbackPort))    allowed.callbackPort = body.callbackPort;
+  if (typeof body.redirectHost === 'string')  allowed.redirectHost = body.redirectHost.trim() || 'localhost';
+  if (typeof body.redirectPath === 'string')  allowed.redirectPath = body.redirectPath.trim() || '/oauth/callback';
   if (typeof body.discoveryHost === 'string') allowed.discoveryHost = body.discoveryHost.trim();
   if (Array.isArray(body.scopes))             allowed.scopes = body.scopes.filter((s) => typeof s === 'string');
   if (body.endpoints && typeof body.endpoints === 'object') allowed.endpoints = body.endpoints;
   const merged = store.setConfig(allowed);
-  sendJson(res, 200, { ok: true, config: merged });
+  sendJson(res, 200, { ok: true, config: merged, redirectUri: computeRedirectUri(merged) });
 }
 
 export async function statusHandler({ sendJson, res }) {

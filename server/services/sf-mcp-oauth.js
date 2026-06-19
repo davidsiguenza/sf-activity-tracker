@@ -75,21 +75,26 @@ export async function runAuthFlow(opts = {}) {
   const code_challenge = base64url(createHash('sha256').update(code_verifier).digest());
   const state = base64url(randomBytes(16));
 
-  const callbackPath = '/sf-mcp/oauth/callback';
-  const redirectUri = `http://127.0.0.1:${cfg.callbackPort}${callbackPath}`;
+  // Build the redirect URI from config. Default `http://localhost:8082/callback` —
+  // the SF Platform MCP Connected App accepts the same path Claude Code uses.
+  const callbackPath = cfg.redirectPath || '/callback';
+  const redirectHost = cfg.redirectHost || 'localhost';
+  const redirectUri = `http://${redirectHost}:${cfg.callbackPort}${callbackPath}`;
 
-  const scope = (cfg.scopes && cfg.scopes.length ? cfg.scopes : ['api', 'refresh_token']).join(' ');
+  // SF Platform MCP requires the `mcp_api` scope, not the generic `api` scope.
+  const scope = (cfg.scopes && cfg.scopes.length ? cfg.scopes : ['mcp_api', 'refresh_token']).join(' ');
 
-  const authParams = new URLSearchParams({
-    client_id: cfg.clientId,
-    redirect_uri: redirectUri,
-    response_type: 'code',
-    scope,
-    state,
-    code_challenge,
-    code_challenge_method: 'S256',
-  });
-  const authUrl = `${meta.authorization_endpoint}?${authParams.toString()}`;
+  // Use the URL API so any query params already present in authorization_endpoint
+  // (e.g. Salesforce returns `...?prompt=select_account`) survive correctly.
+  const u = new URL(meta.authorization_endpoint);
+  u.searchParams.set('client_id', cfg.clientId);
+  u.searchParams.set('redirect_uri', redirectUri);
+  u.searchParams.set('response_type', 'code');
+  u.searchParams.set('scope', scope);
+  u.searchParams.set('state', state);
+  u.searchParams.set('code_challenge', code_challenge);
+  u.searchParams.set('code_challenge_method', 'S256');
+  const authUrl = u.toString();
 
   // Stash so a parallel call rejects cleanly
   if (_pending) {

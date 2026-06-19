@@ -1794,6 +1794,9 @@ async function refreshSfMcpSection() {
     const r = await fetchJson('/api/sf-mcp/config');
     document.getElementById('sf-mcp-client-id').value = r.clientId || '';
     document.getElementById('sf-mcp-callback-port').value = r.callbackPort || 8082;
+    document.getElementById('sf-mcp-redirect-host').value = r.redirectHost || 'localhost';
+    document.getElementById('sf-mcp-redirect-path').value = r.redirectPath || '/oauth/callback';
+    document.getElementById('sf-mcp-redirect-uri-display').textContent = r.redirectUri || '—';
     paintSfMcpStatus(r);
   } catch (e) {
     document.getElementById('sf-mcp-status').textContent = `Error: ${e.message}`;
@@ -1816,14 +1819,21 @@ function paintSfMcpStatus(s) {
 async function saveSfMcpConfig() {
   const clientId = document.getElementById('sf-mcp-client-id').value.trim();
   const callbackPort = parseInt(document.getElementById('sf-mcp-callback-port').value, 10);
+  const redirectHost = document.getElementById('sf-mcp-redirect-host').value.trim() || 'localhost';
+  const redirectPath = document.getElementById('sf-mcp-redirect-path').value.trim() || '/oauth/callback';
   showSfMcpOutput('Guardando…');
   try {
-    await fetchJson('/api/sf-mcp/config', {
+    const r = await fetchJson('/api/sf-mcp/config', {
       method: 'PUT',
-      body: { clientId: clientId || null, callbackPort: Number.isInteger(callbackPort) ? callbackPort : 8082 },
+      body: {
+        clientId: clientId || null,
+        callbackPort: Number.isInteger(callbackPort) ? callbackPort : 8082,
+        redirectHost,
+        redirectPath,
+      },
     });
     await refreshSfMcpSection();
-    showSfMcpOutput('✓ Config guardada.');
+    showSfMcpOutput(`✓ Config guardada. Redirect URI: ${r.redirectUri}`);
   } catch (e) {
     showSfMcpOutput(`✗ ${e.message}`);
   }
