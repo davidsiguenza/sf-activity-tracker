@@ -1,5 +1,5 @@
 import { load } from '../lib/config-store.js';
-import { createRecord, query } from '../services/salesforce.js';
+import { createRecord, updateRecord, query } from '../services/salesforce.js';
 import * as overrides from '../services/overrides-store.js';
 
 const SE_RECORD_TYPE_ID = '01230000001GgBYAA0'; // Solutions Event
@@ -92,9 +92,25 @@ export async function post({ body, req, res }) {
         EndDateTime: item.endUtc,
         SE_Task_Type__c: item.seTaskType,
       };
-      if (item.whatId) fields.WhatId = item.whatId;
+
+      // WhatId workaround for the org62 EventTrigger → Nebula Logger crash.
+      // EventTrigger is declared `before insert` ONLY. Inserting an Event whose
+      // WhatId points to an Opportunity (006…) fires SEInvolvedUtil → UPDATE
+      // Opportunity → tf_OpportunityTrigger → NebulaLoggerUtils.flushLogs(), which
+      // throws an uncaught System.UnexpectedException and aborts the whole INSERT
+      // (CANNOT_INSERT_UPDATE_ACTIVATE_ENTITY). A PATCH (update) does NOT fire the
+      // before-insert trigger, so we create the Event WITHOUT WhatId, then set the
+      // WhatId in a second update call. WhatIds that aren't Opportunities (Accounts
+      // 001…, etc.) don't hit SEInvolvedUtil.isOppty(), so they're safe to inline.
+      const whatId = item.whatId;
+      const deferWhatId = typeof whatId === 'string' && whatId.startsWith('006');
+      if (whatId && !deferWhatId) fields.WhatId = whatId;
 
       const eventId = await createRecord('Event', fields);
+      if (deferWhatId) {
+        // Second step: attach the Opportunity via update (does not fire EventTrigger).
+        await updateRecord('Event', eventId, { WhatId: whatId });
+      }
       eventsCreated.push({ id: eventId, eventId: item.eventId, subject: item.subject });
       // Successful create → drop the user override for this event (no longer needed,
       // and on next analyze the event will show as already-logged anyway).
