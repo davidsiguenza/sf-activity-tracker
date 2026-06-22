@@ -79,13 +79,12 @@ Crea tu propio OAuth client en GCP Console (gratis):
 1. Ve a [console.cloud.google.com/projectcreate](https://console.cloud.google.com/projectcreate) y crea un proyecto (nombre libre)
 2. APIs & Services → Library → habilita **Google Calendar API**
 3. APIs & Services → OAuth consent screen → External → completa los datos mínimos (nombre app, email contacto)
-4. APIs & Services → Credentials → "+ Create Credentials" → OAuth client ID → tipo **Desktop app** → descarga el JSON
-5. Corre:
-   ```bash
-   gcloud auth application-default login \
-     --client-id-file=~/Downloads/client_secret_<YOUR_FILE>.json \
-     --scopes=https://www.googleapis.com/auth/calendar.readonly,https://www.googleapis.com/auth/userinfo.email
-   ```
+4. **Añade test users** (paso clave si no publicas la app):
+   - En la nueva UI: Google Auth Platform → **Público** → "Usuarios de prueba" → **+ Add users**
+   - En la UI antigua: OAuth consent screen → Test users → **+ Add users**
+   - Añade el email Google con el que harás login (ej. `tu@salesforce.com`, `tu@gmail.com`). Sin esto, OAuth falla con `Error 403: access_denied` aunque todo lo demás esté bien.
+5. APIs & Services → Credentials → "+ Create Credentials" → OAuth client ID → tipo **Desktop app** → en "Authorized redirect URIs" añade `http://127.0.0.1:7825/api/oauth/callback` → descarga el JSON
+6. Súbelo en la app: Settings → Google Calendar backend → Paso 1 → pega el JSON → Save → **Connect with Google**
 
 Tu propio client = tus propias credenciales = no caduca por cambios en el client default de Google.
 

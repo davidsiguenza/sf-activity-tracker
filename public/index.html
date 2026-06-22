@@ -274,11 +274,19 @@ Wellness</textarea>
         <details class="setup-help">
           <summary>¿Cómo configuro esto? <span class="hint">(pasos manuales o pídeselo a tu IA)</span></summary>
           <div class="setup-help-body">
-            <p><b>Pasos manuales</b> (5 min):</p>
+            <p><b>Pasos manuales</b> (8 min):</p>
             <ol>
-              <li>Abre <a href="https://console.cloud.google.com/apis/credentials" target="_blank">GCP Console → Credentials</a> y crea (o reusa) un proyecto.</li>
-              <li>Habilita <b>Google Calendar API</b> en el library del proyecto.</li>
-              <li>Credentials → <b>Create credentials</b> → OAuth client ID → tipo <b>Desktop app</b>.</li>
+              <li>Abre <a href="https://console.cloud.google.com/projectcreate" target="_blank">GCP Console</a> y crea (o reusa) un proyecto.</li>
+              <li><a href="https://console.cloud.google.com/apis/library/calendar-json.googleapis.com" target="_blank">Habilita <b>Google Calendar API</b></a> en el proyecto.</li>
+              <li><a href="https://console.cloud.google.com/apis/credentials/consent" target="_blank">OAuth consent screen</a> → <b>External</b> → completa nombre app y emails → Save.</li>
+              <li><b>Añade test users (paso clave)</b>:
+                <ul>
+                  <li><b>UI nueva</b> (Google Auth Platform): <a href="https://console.cloud.google.com/auth/audience" target="_blank">Auth Platform → Público</a> → "Usuarios de prueba" → <b>+ Add users</b>.</li>
+                  <li><b>UI antigua</b>: OAuth consent screen → "Test users" → <b>+ Add users</b>.</li>
+                  <li>Añade el email Google con el que vas a loguear (típicamente tu @salesforce.com y/o tu @gmail.com). Si no lo haces, OAuth falla con <code>Error 403: access_denied</code> aunque todo lo demás esté bien.</li>
+                </ul>
+              </li>
+              <li><a href="https://console.cloud.google.com/apis/credentials" target="_blank">Credentials</a> → <b>+ Create credentials</b> → OAuth client ID → tipo <b>Desktop app</b>.</li>
               <li>En "Authorized redirect URIs" añade exactamente: <code style="user-select: all;">http://127.0.0.1:7825/api/oauth/callback</code></li>
               <li>Descarga el JSON, pégalo en "Paso 1" abajo, y pulsa "Save client JSON".</li>
               <li>Pulsa <b>Connect with Google</b>.</li>
@@ -286,18 +294,48 @@ Wellness</textarea>
             <div class="ai-prompt-block">
               <header><span>📋 Prompt para tu IA</span><button class="copy-prompt-btn">Copiar</button></header>
               <pre>Ayúdame a conectar Google Calendar al sf-activity-tracker que tengo
-corriendo en localhost:7825 en este Mac.
+corriendo en localhost:7825 en este Mac. El email Google con el que
+voy a hacer login es: TU_EMAIL_AQUI (sustitúyelo).
 
-1. Abre https://console.cloud.google.com/apis/credentials en mi
-   navegador. Si no tengo proyecto, créame uno. Si ya hay uno,
-   úsalo.
-2. Habilita "Google Calendar API" para ese proyecto.
-3. Crea un OAuth client ID tipo "Desktop app".
-4. En "Authorized redirect URIs" añade EXACTAMENTE:
-   http://127.0.0.1:7825/api/oauth/callback
-5. Descarga el JSON resultante y pégame su contenido aquí — yo lo
-   guardo en Settings → Calendario → Paso 1 de la app.
-6. Reporta cualquier error o paso que no haya quedado claro.</pre>
+1. Abre https://console.cloud.google.com/projectcreate y crea un
+   proyecto (o usa uno existente). Apunta el nombre del proyecto.
+
+2. Habilita "Google Calendar API" en el library del proyecto:
+   https://console.cloud.google.com/apis/library/calendar-json.googleapis.com
+
+3. Configura el OAuth consent screen:
+   https://console.cloud.google.com/apis/credentials/consent
+   - User Type: External
+   - App name: sf-activity-tracker (o lo que quieras)
+   - User support email + Developer contact: mi email
+   - Scopes: sin tocar nada, Save and Continue
+   - Save and Continue hasta el Dashboard
+
+4. CRÍTICO: añade mi email como Test User. Sin este paso, OAuth
+   falla con "Error 403: access_denied" aunque todo lo demás
+   esté bien.
+   - UI nueva (Google Auth Platform): ve a
+     https://console.cloud.google.com/auth/audience
+     → "Usuarios de prueba" → + Add users → mete mi email
+   - UI antigua: OAuth consent screen → Test users → + Add users
+     → mete mi email
+   Confírmame qué UI viste y que mi email quedó en la lista.
+
+5. Crea el OAuth client:
+   https://console.cloud.google.com/apis/credentials
+   → + Create credentials → OAuth client ID
+   - Application type: Desktop app
+   - Name: lo que quieras
+   - Authorized redirect URIs: añade EXACTAMENTE:
+     http://127.0.0.1:7825/api/oauth/callback
+   - Create
+
+6. Descárgame el JSON del client recién creado y pégame su
+   contenido aquí — yo lo subo a Settings → Calendario → Paso 1
+   en la app.
+
+7. Después de subirlo, pulsaré "Connect with Google" en la app.
+   Si peta con access_denied, vuelves a confirmar el paso 4.</pre>
             </div>
           </div>
         </details>
