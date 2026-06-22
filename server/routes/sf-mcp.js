@@ -11,7 +11,7 @@
 
 import { runAuthFlow } from '../services/sf-mcp-oauth.js';
 import * as store from '../services/sf-mcp-store.js';
-import { listReadsTools, listMutationsTools } from '../services/sf-mcp-client.js';
+import { listReadsTools, listMutationsTools, resetSessions } from '../services/sf-mcp-client.js';
 
 function computeRedirectUri(cfg) {
   return `http://${cfg.redirectHost || 'localhost'}:${cfg.callbackPort}${cfg.redirectPath || '/oauth/callback'}`;
@@ -97,6 +97,7 @@ export async function oauthStartHandler({ sendJson, res }) {
 
 export async function oauthDisconnectHandler({ sendJson, res }) {
   store.clearTokens();
+  resetSessions(); // drop cached MCP sessions so a reconnect re-handshakes cleanly
   sendJson(res, 200, { ok: true });
 }
 

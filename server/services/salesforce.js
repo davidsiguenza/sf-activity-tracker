@@ -1,151 +1,141 @@
-// Wrapper around the `sf` CLI for org62.
-// All calls return parsed JSON. Stderr noise (cert warnings) is silenced.
+// Salesforce data layer for org62 — backed by the hosted Platform MCP servers.
+//
+// IMPORTANT: org62 is accessed EXCLUSIVELY via MCP (platform/sobject-reads +
+// platform/sobject-mutations), NOT the `sf` CLI. The CLI connection is not a
+// reliable path here; the whole point of the MCP integration is to replace it.
+// This module keeps the SAME public API the rest of the app already imports
+// (query, createRecord, deleteRecord, getOrgInfo, getInstanceUrl, healthCheck,
+// queryTooling) so callers (matcher.js, create.js, setup.js, sf.js) are untouched.
 
-import { spawn } from 'node:child_process';
-
-const TARGET_ORG = 'org62';
+import { callTool } from './sf-mcp-client.js';
+import { getTokens, isConfigured, hasTokens } from './sf-mcp-store.js';
 
 /**
- * Run a `sf` command and return parsed JSON.
- * @param {string[]} args - args after `sf`
- * @returns {Promise<any>} parsed `result` from `sf --json` output
+ * Unwrap an MCP tools/call result. The Platform MCP returns:
+ *   { content: [{ type: 'text', text: '<json>' }], isError?: bool }
+ * We parse the text payload as JSON and surface tool-level errors clearly.
+ * @param {any} result - the JSON-RPC `result` from callTool
+ * @returns {any} the parsed payload
  */
-function runSf(args) {
-  return new Promise((resolve, reject) => {
-    const child = spawn('sf', args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (d) => (stdout += d));
-    child.stderr.on('data', (d) => (stderr += d));
-    child.on('error', reject);
-    child.on('close', (code) => {
-      let parsed = null;
-      try {
-        parsed = JSON.parse(stdout);
-      } catch (e) {
-        return reject(new Error(`sf output not JSON (exit ${code}): ${stdout.slice(0, 500)} || stderr: ${stderr.slice(0, 300)}`));
-      }
-      if (parsed?.status !== 0) {
-        return reject(new Error(`sf error: ${parsed?.message || JSON.stringify(parsed).slice(0, 500)}`));
-      }
-      resolve(parsed.result);
-    });
-  });
+function unwrap(result) {
+  const block = result?.content?.find((c) => c?.type === 'text') || result?.content?.[0];
+  const text = block?.text;
+  let parsed;
+  if (typeof text === 'string') {
+    try { parsed = JSON.parse(text); } catch { parsed = text; }
+  } else {
+    parsed = result;
+  }
+  if (result?.isError) {
+    // SF errors come back as an array of {message, errorCode}
+    const msg = Array.isArray(parsed)
+      ? parsed.map((e) => `${e.errorCode || 'ERROR'}: ${e.message || JSON.stringify(e)}`).join('; ')
+      : (parsed?.message || JSON.stringify(parsed).slice(0, 500));
+    throw new Error(`MCP tool error: ${msg}`);
+  }
+  return parsed;
+}
+
+/** Guard: make sure the MCP connection is set up before any data call. */
+function assertReady() {
+  if (!isConfigured() || !hasTokens()) {
+    throw new Error('Salesforce MCP not connected. Open Settings → Backend Salesforce and click Connect.');
+  }
 }
 
 /**
- * Run a SOQL query against org62.
+ * Run a SOQL query against org62 via the reads MCP server.
  * @param {string} soql
  * @returns {Promise<Array<Object>>} array of records
  */
 export async function query(soql) {
-  const result = await runSf([
-    'data',
-    'query',
-    '--target-org',
-    TARGET_ORG,
-    '--query',
-    soql,
-    '--json',
-  ]);
-  return result?.records || [];
+  assertReady();
+  const res = await callTool('reads', 'soqlQuery', { q: soql });
+  const payload = unwrap(res);
+  return payload?.records || [];
 }
 
 /**
- * Run a SOQL query against the tooling API (used for FieldDefinition, EntityDefinition, etc.).
+ * Tooling-API query. The Platform MCP `soqlQuery` runs against the standard
+ * Data API, not the Tooling API, so this is not supported via MCP. Kept for
+ * interface compatibility; throws a clear error if ever called (no current callers).
  */
-export async function queryTooling(soql) {
-  const result = await runSf([
-    'data',
-    'query',
-    '--target-org',
-    TARGET_ORG,
-    '--query',
-    soql,
-    '--use-tooling-api',
-    '--json',
-  ]);
-  return result?.records || [];
+export async function queryTooling(_soql) {
+  throw new Error('queryTooling is not available over the Platform MCP (no Tooling API tool).');
 }
 
 /**
- * Create a single record via `sf data create record`. Returns the new record Id.
- * Modern sf CLI v2 uses space-separated subcommands, NOT hyphenated.
- * --values format: single string of `field=value` pairs separated by spaces.
- *                  Values with spaces must be wrapped in single quotes.
- *                  Internal apostrophes are normalized to right-single-quote (’) to avoid escaping pain.
- * @param {string} sobject
- * @param {Object} fields - field name/value pairs
+ * Create a single record via the mutations MCP server. Returns the new record Id.
+ * @param {string} sobject - e.g. 'Event', 'Deal_Contribution__c'
+ * @param {Object} fields - field name/value pairs (null/undefined are dropped)
  * @returns {Promise<string>} record Id
  */
 export async function createRecord(sobject, fields) {
-  const valuesStr = Object.entries(fields)
-    .filter(([, v]) => v !== null && v !== undefined)
-    .map(([k, v]) => `${k}=${formatValue(v)}`)
-    .join(' ');
-
-  const result = await runSf([
-    'data',
-    'create',
-    'record',
-    '--target-org',
-    TARGET_ORG,
-    '--sobject',
-    sobject,
-    '--values',
-    valuesStr,
-    '--json',
-  ]);
-  return result?.id;
+  assertReady();
+  const body = {};
+  for (const [k, v] of Object.entries(fields)) {
+    if (v !== null && v !== undefined) body[k] = v;
+  }
+  const res = await callTool('mutations', 'createSobjectRecord', {
+    'sobject-name': sobject,
+    body,
+  });
+  const payload = unwrap(res);
+  // REST create returns { id, success, errors }
+  if (payload?.success === false) {
+    throw new Error(`Create ${sobject} failed: ${JSON.stringify(payload.errors || payload)}`);
+  }
+  return payload?.id || payload?.Id;
 }
 
 /**
- * Delete a single record via `sf data delete record`.
+ * Update a single record via the mutations MCP server.
+ * @param {string} sobject
+ * @param {string} recordId
+ * @param {Object} fields - fields to update
+ * @returns {Promise<void>}
  */
-export async function deleteRecord(sobject, recordId) {
-  const result = await runSf([
-    'data',
-    'delete',
-    'record',
-    '--target-org',
-    TARGET_ORG,
-    '--sobject',
-    sobject,
-    '--record-id',
-    recordId,
-    '--json',
-  ]);
-  return result?.id;
+export async function updateRecord(sobject, recordId, fields) {
+  assertReady();
+  const body = {};
+  for (const [k, v] of Object.entries(fields)) {
+    if (v !== null && v !== undefined) body[k] = v;
+  }
+  const res = await callTool('mutations', 'updateSobjectRecord', {
+    'sobject-name': sobject,
+    id: recordId,
+    body,
+  });
+  // update returns 204 / empty on success; unwrap will throw on isError
+  unwrap(res);
 }
 
 /**
- * Format a value for the `--values "field=value"` syntax accepted by `sf data create record`.
- * - Empty values become empty (skipped by caller).
- * - Strings containing spaces or special chars are wrapped in single quotes.
- * - Internal single quotes are normalized to right-single-quote (’) — Salesforce stores them fine.
- * - Booleans / numbers / ISO datetimes pass through unquoted.
+ * Delete is not exposed by the reads/mutations MCP servers (would need
+ * platform/sobject-deletes). Kept for interface compatibility.
  */
-function formatValue(v) {
-  let s = String(v);
-  // normalize apostrophes so we don't have to deal with escaping inside single-quoted values
-  s = s.replace(/'/g, '’');
-  // ISO datetime, IDs, numbers, booleans → unquoted
-  if (/^[\w.+\-:]+$/.test(s)) return s;
-  // anything else → single-quote wrap
-  return `'${s}'`;
+export async function deleteRecord(_sobject, _recordId) {
+  throw new Error('deleteRecord requires the platform/sobject-deletes MCP server (not connected).');
 }
 
 /**
- * Resolve and cache org metadata from `sf org display`. Returns the instance
- * URL (for record links) AND the authenticated username (for setup auto-detect).
+ * Resolve org metadata via MCP. instanceUrl comes from the stored token blob;
+ * username comes from the getUserInfo tool. Cached after first call.
  * @returns {Promise<{instanceUrl: string, username: string}>}
  */
 let _orgInfoCache = null;
 export async function getOrgInfo() {
   if (_orgInfoCache) return _orgInfoCache;
-  const result = await runSf(['org', 'display', '--target-org', TARGET_ORG, '--json']);
-  if (!result?.instanceUrl) throw new Error('sf org display returned no instanceUrl');
-  _orgInfoCache = { instanceUrl: result.instanceUrl, username: result.username || null };
+  assertReady();
+  const instanceUrl = getTokens()?.instance_url || 'https://org62.my.salesforce.com';
+  let username = null;
+  try {
+    const info = unwrap(await callTool('reads', 'getUserInfo', {}));
+    username = info?.identity?.username || info?.username || null;
+  } catch {
+    // non-fatal — username is only used for setup auto-detect
+  }
+  _orgInfoCache = { instanceUrl, username };
   return _orgInfoCache;
 }
 
@@ -155,7 +145,7 @@ export async function getInstanceUrl() {
 }
 
 /**
- * Quick health check: run a trivial query.
+ * Quick health check: run a trivial query over MCP.
  * @returns {Promise<{ok: boolean, error?: string}>}
  */
 export async function healthCheck() {
