@@ -50,7 +50,6 @@ echo
 # ─── /api/health reports ok ──────────────────────────────────────────────────
 echo "Health endpoint"
 HEALTH_OK="$(echo "$HEALTH_JSON" | grep -o '"ok": *[a-z]*' | head -1 | awk -F: '{print $2}' | tr -d ' ')"
-SF_OK="$(echo "$HEALTH_JSON" | grep -o '"salesforce":{[^}]*}' | grep -o '"ok": *[a-z]*' | awk -F: '{print $2}' | tr -d ' ')"
 CONFIGURED="$(echo "$HEALTH_JSON" | grep -o '"configured": *[a-z]*' | awk -F: '{print $2}' | tr -d ' ')"
 
 if [ "$HEALTH_OK" = "true" ]; then
@@ -60,19 +59,48 @@ else
   hint "Raw response: $HEALTH_JSON"
 fi
 
-if [ "$SF_OK" = "true" ]; then
-  ok "Salesforce reachable from server (queries org62 successfully)"
-else
-  fail "Salesforce health check failed"
-  hint "From a terminal: sf org display --target-org org62 --json"
-  hint "If that fails, re-authenticate: sf org login web --alias org62"
-fi
-
 if [ "$CONFIGURED" = "true" ]; then
   ok "config.json exists"
 else
   fail "config.json missing — setup wizard not completed"
   hint "Open $SERVER_URL in your browser and run the setup wizard."
+fi
+echo
+
+# ─── Backend org62 — test BOTH CLI and MCP in parallel ─────────────────────
+echo "org62 backends"
+BACKEND_JSON="$(curl -fsS --max-time 15 -X POST "$SERVER_URL/api/sf-backend/test" 2>/dev/null || echo "")"
+if [ -z "$BACKEND_JSON" ]; then
+  warn "couldn't reach /api/sf-backend/test"
+else
+  MODE="$(echo "$BACKEND_JSON" | grep -o '"mode": *"[^"]*"' | head -1 | awk -F'"' '{print $4}')"
+  ACTIVE="$(echo "$BACKEND_JSON" | grep -o '"active": *"[^"]*"' | head -1 | awk -F'"' '{print $4}')"
+  CLI_OK="$(echo "$BACKEND_JSON" | grep -o '"cli":{[^}]*}' | grep -o '"ok": *[a-z]*' | head -1 | awk -F: '{print $2}' | tr -d ' ')"
+  MCP_OK="$(echo "$BACKEND_JSON" | grep -o '"mcp":{[^}]*}' | grep -o '"ok": *[a-z]*' | head -1 | awk -F: '{print $2}' | tr -d ' ')"
+  CLI_ERR="$(echo "$BACKEND_JSON" | grep -o '"cli":{[^}]*}' | sed -E 's/.*"error": *"([^"]+)".*/\1/' | head -1)"
+  MCP_ERR="$(echo "$BACKEND_JSON" | grep -o '"mcp":{[^}]*}' | sed -E 's/.*"error": *"([^"]+)".*/\1/' | head -1)"
+
+  if [ "$CLI_OK" = "true" ]; then
+    ok "CLI backend reachable (sf data query on org62)"
+  else
+    warn "CLI backend not reachable"
+    [ -n "$CLI_ERR" ] && [ "$CLI_ERR" != "$BACKEND_JSON" ] && hint "$CLI_ERR"
+    hint "Fix: sf org login web --alias org62  (or use mode='mcp')"
+  fi
+
+  if [ "$MCP_OK" = "true" ]; then
+    ok "MCP backend reachable (Platform MCP soqlQuery)"
+  else
+    warn "MCP backend not reachable"
+    [ -n "$MCP_ERR" ] && [ "$MCP_ERR" != "$BACKEND_JSON" ] && hint "$MCP_ERR"
+    hint "Fix: Settings → Backend Salesforce — MCP config → Connect via OAuth"
+  fi
+
+  if [ "$CLI_OK" != "true" ] && [ "$MCP_OK" != "true" ]; then
+    fail "neither backend works — analyses will fail"
+  else
+    ok "active backend: ${ACTIVE:-?} · mode: ${MODE:-?}"
+  fi
 fi
 echo
 

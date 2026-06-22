@@ -47,11 +47,12 @@ fi
 echo
 
 # ─── Salesforce CLI ──────────────────────────────────────────────────────────
-echo "Salesforce CLI (sf v2)"
+echo "Salesforce CLI (sf v2) — optional if you'll use the MCP backend exclusively"
 if ! command -v sf >/dev/null 2>&1; then
-  fail "sf not found in PATH"
+  warn "sf not found in PATH"
+  hint "Only required if you want the CLI backend (modes 'cli' or 'auto'). "
   hint "Install: npm install -g @salesforce/cli"
-  hint "  (or: brew install --cask sfdx-cli)"
+  hint "If you'll use MCP only, set Settings → Backend org62 → 'Solo MCP'."
 else
   SF_VERSION="$(sf --version 2>/dev/null | head -1)"
   if echo "$SF_VERSION" | grep -q "@salesforce/cli/2\."; then
@@ -88,22 +89,24 @@ fi
 echo
 
 # ─── sf authenticated against org62 ──────────────────────────────────────────
-echo "Salesforce auth (sf org login → alias 'org62')"
+echo "Salesforce auth (sf org login → alias 'org62') — optional"
 if ! command -v sf >/dev/null 2>&1; then
   warn "skipped (sf not installed)"
+  hint "Use the MCP backend instead — no CLI needed."
 else
   if sf org list --json 2>/dev/null | grep -q '"alias": *"org62"'; then
     if sf org display --target-org org62 --json >/dev/null 2>&1; then
       ORG_USERNAME="$(sf org display --target-org org62 --json 2>/dev/null | grep -o '"username": *"[^"]*"' | head -1 | sed 's/.*"username": *"\([^"]*\)".*/\1/')"
       ok "alias 'org62' authenticated as $ORG_USERNAME"
     else
-      fail "alias 'org62' exists but auth is broken (token expired?)"
-      hint "Re-authenticate: sf org login web --alias org62"
+      warn "alias 'org62' exists but auth is broken (token expired?)"
+      hint "Re-authenticate: SFDX_DISABLE_DNS_CHECK=true sf org login web --alias org62"
+      hint "Or skip CLI and use Settings → Backend org62 → 'Solo MCP'."
     fi
   else
-    fail "no 'org62' alias configured"
-    hint "Authenticate: sf org login web --alias org62"
-    hint "  (browser opens, log in with your @salesforce.com account)"
+    warn "no 'org62' alias configured"
+    hint "Authenticate: SFDX_DISABLE_DNS_CHECK=true sf org login web --alias org62"
+    hint "Or skip CLI and use Settings → Backend org62 → 'Solo MCP'."
   fi
 fi
 echo

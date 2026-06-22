@@ -1,23 +1,61 @@
 # How sf-activity-tracker talks to Salesforce
 
-Short version: **we don't.** The Node server shells out to the **`sf` CLI v2** (`@salesforce/cli`) for every Salesforce interaction — query, create, delete, org metadata. There is no `jsforce` dependency, no Connected App owned by this tool, no REST client, no stored access tokens.
+Two backends behind a router. The app picks whichever one works on each machine.
 
-This doc explains why, what the wiring looks like, and the gotchas we hit. Aimed at someone building a similar tracker who has the SF API knowledge but is stuck on the connection layer.
+1. **CLI backend** (`server/services/salesforce-cli.js`) — shells out to the **`sf` CLI v2** (`@salesforce/cli`). Reuses the user's existing local auth. No tokens stored. Default for SEs with a working `sf org login web --alias org62`.
+2. **MCP backend** (`server/services/salesforce-mcp.js`) — talks to Salesforce's hosted Platform MCP (`api.salesforce.com/platform/mcp/v1/...`) over Streamable HTTP, authenticating via OAuth 2.0 + PKCE + RFC 8414 discovery. Used when the CLI is unavailable (corp DNS issues, expired tokens, fresh laptop, etc).
+
+The router (`server/services/salesforce.js`) reads `~/.config/sf-activity-tracker/backend-config.json` and dispatches every call to one of the two peer modules. Both expose the **same public API** (`query`, `createRecord`, `getOrgInfo`, `healthCheck`, …) so callers (matcher, create, setup) don't know or care which is serving the request.
+
+Three modes (set in Settings → Cuenta → Backend org62):
+- `cli` — always CLI
+- `mcp` — always MCP
+- `auto` — try the preferred one first; on a **connection-class** failure (no auth, no tokens, ECONNREFUSED, 401/403, etc.) fall back to the other and cache the winner as `active`
 
 ---
 
-## Why the `sf` CLI and not [X]
+## Why two backends instead of one
 
-We considered:
+We tried CLI-only first; it had real-world failures we couldn't shrug off across the SE fleet:
 
-| Approach | Why we rejected it |
+| Failure | When |
 |---|---|
-| **Connected App + OAuth in the tracker** | Each user would need to either create their own Connected App or trust ours. SE laptops already have `sf` configured against org62 — reusing that is zero-friction. |
-| **jsforce + access token** | Same problem: where does the token come from? If from `sf`, you're already depending on it; might as well shell out. If from OAuth in-app, see row above. |
-| **REST with `Authorization: Bearer ...`** | Works once you have the token, but you still need to refresh it. The CLI handles refresh transparently. |
-| **MCP / Salesforce MCP server** | Slower (extra hop), and we don't want to assume the user has it set up. |
+| `sf` CLI not installed | Fresh laptops |
+| Corp DNS doesn't resolve `login.salesforce.com` from outside SF VPN | WFH / roaming |
+| `sf` auth tokens expired and refresh fails silently | Periodic |
+| Newer macOS sandboxing blocks `sf`'s keychain access | Rare but devastating |
 
-Net: **`sf` CLI wins on "user already has it set up + handles auth refresh + zero credentials in our app"**. The cost is process spawn overhead per call (~150-300ms), which is fine for batch creates of <50 records but would hurt at 1000+.
+We tried MCP-only too; that has its own pitfalls:
+
+| Failure | When |
+|---|---|
+| Connected App OAuth fails in restricted browsers (corp Chrome extensions) | Occasional |
+| MCP endpoint requires `mcp_api` scope (not `api`); guessing wrong → "JWT Token is required" with valid tokens | Setup-time |
+| MCP session handshake (`initialize` + `Mcp-Session-Id` header) easy to miss | Setup-time |
+
+Net: **whichever route works on a given machine is the one we use**. The router + `auto` mode means the user doesn't usually have to think about which.
+
+---
+
+## MCP backend wiring
+
+OAuth flow (zero-deps, all Node built-ins):
+1. Discovery — `GET https://api.salesforce.com/.well-known/oauth-authorization-server` returns `authorization_endpoint`, `token_endpoint`.
+2. PKCE — generate `code_verifier` + `code_challenge` (SHA256, base64url).
+3. Local listener on `callbackPort` (default `8082`) at path `/callback`.
+4. Open the user's browser to the authorization endpoint with `client_id`, `redirect_uri=http://localhost:8082/callback`, `scope=mcp_api refresh_token`, `code_challenge_method=S256`.
+5. User completes SSO; SF redirects to our local listener with `code`.
+6. POST to `token_endpoint` with the code + verifier → access + refresh tokens. Persisted to `~/.config/sf-activity-tracker/sf-mcp-tokens.json` (mode 0600).
+
+MCP transport handshake (every endpoint, once per session):
+1. POST `{"jsonrpc":"2.0","method":"initialize",...}` to the endpoint. Capture the `Mcp-Session-Id` response header.
+2. POST `{"jsonrpc":"2.0","method":"notifications/initialized"}` with that header.
+3. Every subsequent `tools/call` / `tools/list` must send `Mcp-Session-Id`.
+4. On 400/404 (session expired) → re-initialize and retry once. On 401 → refresh access token and retry once.
+
+The session cache is per-endpoint (`reads` and `mutations` get separate sessions).
+
+**Critical gotcha**: SF Platform MCP requires the `mcp_api` scope, NOT the generic `api`. If you guess wrong the token exchange succeeds but every tool call returns `JWT Token is required`.
 
 ---
 
