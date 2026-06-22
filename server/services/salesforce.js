@@ -1,158 +1,167 @@
-// Salesforce data layer for org62 — backed by the hosted Platform MCP servers.
+// Router for the org62 data layer. Dispatches to salesforce-cli.js or
+// salesforce-mcp.js based on the user's backend preference, with optional
+// fallback in 'auto' mode.
 //
-// IMPORTANT: org62 is accessed EXCLUSIVELY via MCP (platform/sobject-reads +
-// platform/sobject-mutations), NOT the `sf` CLI. The CLI connection is not a
-// reliable path here; the whole point of the MCP integration is to replace it.
-// This module keeps the SAME public API the rest of the app already imports
-// (query, createRecord, deleteRecord, getOrgInfo, getInstanceUrl, healthCheck,
-// queryTooling) so callers (matcher.js, create.js, setup.js, sf.js) are untouched.
+// Public API (matches both backends):
+//   query(soql)
+//   queryTooling(soql)              ← only supported by CLI
+//   createRecord(sobject, fields)
+//   updateRecord(sobject, id, fields) ← only on MCP today
+//   deleteRecord(sobject, id)       ← only on CLI today
+//   getOrgInfo() → {instanceUrl, username}
+//   getInstanceUrl()
+//   healthCheck() → {ok, error?}
+//
+// All callers (matcher.js, create.js, setup.js, sf.js) import from here and
+// don't know which backend is actually serving the request.
 
-import { callTool } from './sf-mcp-client.js';
-import { getTokens, isConfigured, hasTokens } from './sf-mcp-store.js';
+import * as cli from './salesforce-cli.js';
+import * as mcp from './salesforce-mcp.js';
+import { getBackendConfig, setActive } from './backend-store.js';
+
+const BACKENDS = { cli, mcp };
 
 /**
- * Unwrap an MCP tools/call result. The Platform MCP returns:
- *   { content: [{ type: 'text', text: '<json>' }], isError?: bool }
- * We parse the text payload as JSON and surface tool-level errors clearly.
- * @param {any} result - the JSON-RPC `result` from callTool
- * @returns {any} the parsed payload
+ * Decide which backend to use for the next call.
+ * - mode='cli'  → always cli
+ * - mode='mcp'  → always mcp
+ * - mode='auto' → use cached `active` if set; otherwise `preferred`
+ *
+ * In auto mode, callers should be prepared to retry via the alternate
+ * backend on connection-style failures — that's what tryWithFallback() does.
  */
-function unwrap(result) {
-  const block = result?.content?.find((c) => c?.type === 'text') || result?.content?.[0];
-  const text = block?.text;
-  let parsed;
-  if (typeof text === 'string') {
-    try { parsed = JSON.parse(text); } catch { parsed = text; }
-  } else {
-    parsed = result;
-  }
-  if (result?.isError) {
-    // SF errors come back as an array of {message, errorCode}
-    const msg = Array.isArray(parsed)
-      ? parsed.map((e) => `${e.errorCode || 'ERROR'}: ${e.message || JSON.stringify(e)}`).join('; ')
-      : (parsed?.message || JSON.stringify(parsed).slice(0, 500));
-    throw new Error(`MCP tool error: ${msg}`);
-  }
-  return parsed;
-}
-
-/** Guard: make sure the MCP connection is set up before any data call. */
-function assertReady() {
-  if (!isConfigured() || !hasTokens()) {
-    throw new Error('Salesforce MCP not connected. Open Settings → Backend Salesforce and click Connect.');
-  }
+function pickBackend() {
+  const cfg = getBackendConfig();
+  if (cfg.mode === 'cli') return cli;
+  if (cfg.mode === 'mcp') return mcp;
+  // auto
+  const key = cfg.active || cfg.preferred || 'cli';
+  return BACKENDS[key] || cli;
 }
 
 /**
- * Run a SOQL query against org62 via the reads MCP server.
- * @param {string} soql
- * @returns {Promise<Array<Object>>} array of records
+ * Run an op against the chosen backend. In 'auto' mode, on connection
+ * failure, try the other backend once and remember which one worked.
+ *
+ * A "connection failure" is anything that looks like the backend itself
+ * is not reachable / authorized. We DON'T fallback for SOQL syntax errors
+ * or business-logic failures (e.g. INVALID_FIELD) — those should surface.
  */
-export async function query(soql) {
-  assertReady();
-  const res = await callTool('reads', 'soqlQuery', { q: soql });
-  const payload = unwrap(res);
-  return payload?.records || [];
-}
+async function tryWithFallback(opName, fn) {
+  const cfg = getBackendConfig();
+  const primary = pickBackend();
+  const primaryKey = primary === cli ? 'cli' : 'mcp';
 
-/**
- * Tooling-API query. The Platform MCP `soqlQuery` runs against the standard
- * Data API, not the Tooling API, so this is not supported via MCP. Kept for
- * interface compatibility; throws a clear error if ever called (no current callers).
- */
-export async function queryTooling(_soql) {
-  throw new Error('queryTooling is not available over the Platform MCP (no Tooling API tool).');
-}
-
-/**
- * Create a single record via the mutations MCP server. Returns the new record Id.
- * @param {string} sobject - e.g. 'Event', 'Deal_Contribution__c'
- * @param {Object} fields - field name/value pairs (null/undefined are dropped)
- * @returns {Promise<string>} record Id
- */
-export async function createRecord(sobject, fields) {
-  assertReady();
-  const body = {};
-  for (const [k, v] of Object.entries(fields)) {
-    if (v !== null && v !== undefined) body[k] = v;
-  }
-  const res = await callTool('mutations', 'createSobjectRecord', {
-    'sobject-name': sobject,
-    body,
-  });
-  const payload = unwrap(res);
-  // REST create returns { id, success, errors }
-  if (payload?.success === false) {
-    throw new Error(`Create ${sobject} failed: ${JSON.stringify(payload.errors || payload)}`);
-  }
-  return payload?.id || payload?.Id;
-}
-
-/**
- * Update a single record via the mutations MCP server.
- * @param {string} sobject
- * @param {string} recordId
- * @param {Object} fields - fields to update
- * @returns {Promise<void>}
- */
-export async function updateRecord(sobject, recordId, fields) {
-  assertReady();
-  const body = {};
-  for (const [k, v] of Object.entries(fields)) {
-    if (v !== null && v !== undefined) body[k] = v;
-  }
-  const res = await callTool('mutations', 'updateSobjectRecord', {
-    'sobject-name': sobject,
-    id: recordId,
-    body,
-  });
-  // update returns 204 / empty on success; unwrap will throw on isError
-  unwrap(res);
-}
-
-/**
- * Delete is not exposed by the reads/mutations MCP servers (would need
- * platform/sobject-deletes). Kept for interface compatibility.
- */
-export async function deleteRecord(_sobject, _recordId) {
-  throw new Error('deleteRecord requires the platform/sobject-deletes MCP server (not connected).');
-}
-
-/**
- * Resolve org metadata via MCP. instanceUrl comes from the stored token blob;
- * username comes from the getUserInfo tool. Cached after first call.
- * @returns {Promise<{instanceUrl: string, username: string}>}
- */
-let _orgInfoCache = null;
-export async function getOrgInfo() {
-  if (_orgInfoCache) return _orgInfoCache;
-  assertReady();
-  const instanceUrl = getTokens()?.instance_url || 'https://org62.my.salesforce.com';
-  let username = null;
   try {
-    const info = unwrap(await callTool('reads', 'getUserInfo', {}));
-    username = info?.identity?.username || info?.username || null;
-  } catch {
-    // non-fatal — username is only used for setup auto-detect
+    const result = await fn(primary);
+    if (cfg.mode === 'auto' && cfg.active !== primaryKey) setActive(primaryKey);
+    return result;
+  } catch (err) {
+    if (cfg.mode !== 'auto' || !isConnectionError(err)) throw err;
+
+    const secondaryKey = primaryKey === 'cli' ? 'mcp' : 'cli';
+    const secondary = BACKENDS[secondaryKey];
+    try {
+      const result = await fn(secondary);
+      setActive(secondaryKey);
+      return result;
+    } catch (err2) {
+      // Both failed — surface the original error with a hint.
+      const composite = new Error(
+        `${opName} failed on both backends. ${primaryKey}: ${err.message} | ${secondaryKey}: ${err2.message}`
+      );
+      composite.primary = err;
+      composite.secondary = err2;
+      throw composite;
+    }
   }
-  _orgInfoCache = { instanceUrl, username };
-  return _orgInfoCache;
 }
 
-/** Convenience wrapper for the older callers. */
-export async function getInstanceUrl() {
-  return (await getOrgInfo()).instanceUrl;
+/** Heuristic for "the backend isn't reachable / not authed". */
+function isConnectionError(err) {
+  const m = String(err?.message || '').toLowerCase();
+  return (
+    m.includes('not connected') ||
+    m.includes('not configured') ||
+    m.includes('mcp not connected') ||
+    m.includes('no tokens') ||
+    m.includes('no refresh token') ||
+    m.includes('econnrefused') ||
+    m.includes('etimedout') ||
+    m.includes('enotfound') ||
+    m.includes('sf output not json') ||  // CLI not installed / not authed
+    m.includes('no authorization information found') ||
+    m.includes('no org with username') ||
+    m.includes('no defaultusername') ||
+    m.includes('socket hang up') ||
+    m.includes('401') ||
+    m.includes('403') ||
+    m.includes('unauthorized')
+  );
+}
+
+// ─── Public API ──────────────────────────────────────────────────────────────
+
+export async function query(soql)               { return tryWithFallback('query',        (b) => b.query(soql)); }
+export async function createRecord(s, f)        { return tryWithFallback('createRecord', (b) => b.createRecord(s, f)); }
+export async function getOrgInfo()              { return tryWithFallback('getOrgInfo',   (b) => b.getOrgInfo()); }
+export async function getInstanceUrl()          { return tryWithFallback('getInstanceUrl',(b) => b.getInstanceUrl()); }
+
+/** queryTooling: only CLI supports it. Force CLI regardless of mode. */
+export async function queryTooling(soql) {
+  return cli.queryTooling(soql);
+}
+
+/** updateRecord: only MCP exposes it today. */
+export async function updateRecord(sobject, id, fields) {
+  if (typeof mcp.updateRecord === 'function') return mcp.updateRecord(sobject, id, fields);
+  throw new Error('updateRecord requires the MCP backend (no CLI equivalent wired up).');
+}
+
+/** deleteRecord: only CLI exposes it today. */
+export async function deleteRecord(sobject, id) {
+  if (typeof cli.deleteRecord === 'function') return cli.deleteRecord(sobject, id);
+  throw new Error('deleteRecord requires the CLI backend (no MCP equivalent wired up).');
 }
 
 /**
- * Quick health check: run a trivial query over MCP.
- * @returns {Promise<{ok: boolean, error?: string}>}
+ * Run a health check against ONE specific backend.
+ * @param {'cli'|'mcp'} which
  */
-export async function healthCheck() {
+export async function healthCheckBackend(which) {
+  const b = BACKENDS[which];
+  if (!b) return { ok: false, error: `Unknown backend: ${which}` };
   try {
-    await query('SELECT Id FROM Organization LIMIT 1');
-    return { ok: true };
+    const r = await b.healthCheck();
+    return r;
   } catch (e) {
     return { ok: false, error: e.message };
   }
+}
+
+/**
+ * Run a health check against BOTH backends. Useful for the Settings "Test"
+ * button. Updates the cached `active` to the first one that succeeds (or
+ * leaves it untouched if mode != 'auto').
+ */
+export async function healthCheckAll() {
+  const [cliRes, mcpRes] = await Promise.all([
+    healthCheckBackend('cli'),
+    healthCheckBackend('mcp'),
+  ]);
+  const cfg = getBackendConfig();
+  if (cfg.mode === 'auto') {
+    const preferred = cfg.preferred || 'cli';
+    const winner =
+      preferred === 'cli'
+        ? (cliRes.ok ? 'cli' : (mcpRes.ok ? 'mcp' : null))
+        : (mcpRes.ok ? 'mcp' : (cliRes.ok ? 'cli' : null));
+    if (winner) setActive(winner);
+  }
+  return { cli: cliRes, mcp: mcpRes };
+}
+
+/** Default healthCheck — uses the active backend (for legacy callers). */
+export async function healthCheck() {
+  return pickBackend().healthCheck();
 }

@@ -11,6 +11,7 @@ import * as cacheRoute from './cache.js';
 import * as overridesRoute from './overrides.js';
 import * as sfRoute from './sf.js';
 import * as sfMcpRoute from './sf-mcp.js';
+import * as sfBackendRoute from './sf-backend.js';
 
 const ROUTES = [
   { method: 'GET', path: '/api/health', handler: healthRoute.get },
@@ -53,6 +54,10 @@ const ROUTES = [
   { method: 'POST', path: '/api/sf-mcp/oauth/start',      handler: sfMcpRoute.oauthStartHandler },
   { method: 'POST', path: '/api/sf-mcp/oauth/disconnect', handler: sfMcpRoute.oauthDisconnectHandler },
   { method: 'POST', path: '/api/sf-mcp/test',             handler: sfMcpRoute.testHandler },
+  // Backend router — choose CLI vs MCP vs auto, validate both
+  { method: 'GET',  path: '/api/sf-backend/mode', handler: sfBackendRoute.getModeHandler },
+  { method: 'PUT',  path: '/api/sf-backend/mode', handler: sfBackendRoute.putModeHandler },
+  { method: 'POST', path: '/api/sf-backend/test', handler: sfBackendRoute.testHandler },
 ];
 
 export function match(method, path) {

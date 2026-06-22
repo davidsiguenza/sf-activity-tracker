@@ -1733,6 +1733,9 @@ async function openSettings() {
   // SF MCP backend (Fase 1) — load current state into the form
   await refreshSfMcpSection();
 
+  // Backend router (Fase 3) — mode + preferred + active
+  await refreshSfBackendSection();
+
   // Activate the last-used tab (or default to "calendar")
   const lastTab = localStorage.getItem('sfat:settingsTab') || 'calendar';
   switchSettingsTab(lastTab);
@@ -1892,6 +1895,82 @@ document.addEventListener('DOMContentLoaded', () => {
   wire('sf-mcp-connect-btn', connectSfMcp);
   wire('sf-mcp-test-btn', testSfMcp);
   wire('sf-mcp-disconnect-btn', disconnectSfMcp);
+});
+
+// ─── Backend router (CLI vs MCP vs auto) ─────────────────────────────────────
+
+async function refreshSfBackendSection() {
+  try {
+    const cfg = await fetchJson('/api/sf-backend/mode');
+    document.querySelectorAll('input[name="sf-backend-mode"]').forEach((r) => {
+      r.checked = r.value === cfg.mode;
+    });
+    document.querySelectorAll('input[name="sf-backend-preferred"]').forEach((r) => {
+      r.checked = r.value === (cfg.preferred || 'cli');
+    });
+    const prefWrap = document.getElementById('sf-backend-preferred-wrap');
+    if (prefWrap) prefWrap.style.display = cfg.mode === 'auto' ? '' : 'none';
+    renderSfBackendStatus(cfg);
+  } catch (e) {
+    const el = document.getElementById('sf-backend-status');
+    if (el) el.textContent = `Error: ${e.message}`;
+  }
+}
+
+function renderSfBackendStatus(cfg, results) {
+  const el = document.getElementById('sf-backend-status');
+  if (!el) return;
+  const dot = (ok) => ok === true ? '✓' : ok === false ? '✗' : '·';
+  const cliDot = dot(results?.cli?.ok);
+  const mcpDot = dot(results?.mcp?.ok);
+  const cliErr = results?.cli?.error ? ` (${results.cli.error})` : '';
+  const mcpErr = results?.mcp?.error ? ` (${results.mcp.error})` : '';
+  const active = cfg.active ? `<b>${cfg.active.toUpperCase()}</b>` : '—';
+  const checked = cfg.lastChecked ? ` · last checked ${new Date(cfg.lastChecked).toLocaleString()}` : '';
+  el.innerHTML =
+    `Mode: <b>${cfg.mode}</b> · Active: ${active}${checked}<br>` +
+    `CLI ${cliDot}${cliErr}<br>` +
+    `MCP ${mcpDot}${mcpErr}`;
+}
+
+async function saveSfBackendMode() {
+  const modeEl = document.querySelector('input[name="sf-backend-mode"]:checked');
+  const prefEl = document.querySelector('input[name="sf-backend-preferred"]:checked');
+  if (!modeEl) return;
+  const body = { mode: modeEl.value };
+  if (prefEl) body.preferred = prefEl.value;
+  try {
+    await fetchJson('/api/sf-backend/mode', { method: 'PUT', body: JSON.stringify(body) });
+    await refreshSfBackendSection();
+  } catch (e) {
+    const el = document.getElementById('sf-backend-status');
+    if (el) el.textContent = `Error guardando: ${e.message}`;
+  }
+}
+
+async function testSfBackend() {
+  const btn = document.getElementById('sf-backend-test-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Testing…'; }
+  try {
+    const r = await fetchJson('/api/sf-backend/test', { method: 'POST' });
+    renderSfBackendStatus(r.config, r);
+  } catch (e) {
+    const el = document.getElementById('sf-backend-status');
+    if (el) el.textContent = `Test failed: ${e.message}`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Test connection (both)'; }
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('input[name="sf-backend-mode"]').forEach((r) => {
+    r.addEventListener('change', saveSfBackendMode);
+  });
+  document.querySelectorAll('input[name="sf-backend-preferred"]').forEach((r) => {
+    r.addEventListener('change', saveSfBackendMode);
+  });
+  const t = document.getElementById('sf-backend-test-btn');
+  if (t) t.addEventListener('click', testSfBackend);
 });
 
 /**
