@@ -1973,6 +1973,29 @@ document.addEventListener('DOMContentLoaded', () => {
   if (t) t.addEventListener('click', testSfBackend);
 });
 
+// ─── AI-prompt copy buttons in setup-help blocks ─────────────────────────────
+
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('.copy-prompt-btn');
+  if (!btn) return;
+  const block = btn.closest('.ai-prompt-block');
+  const pre = block?.querySelector('pre');
+  if (!pre) return;
+  try {
+    await navigator.clipboard.writeText(pre.textContent);
+    const prev = btn.textContent;
+    btn.textContent = '✓ Copiado';
+    btn.classList.add('is-copied');
+    setTimeout(() => {
+      btn.textContent = prev;
+      btn.classList.remove('is-copied');
+    }, 1500);
+  } catch (err) {
+    btn.textContent = 'Error';
+    setTimeout(() => { btn.textContent = 'Copiar'; }, 1500);
+  }
+});
+
 /**
  * Switch the active tab in the Settings modal. Persists to localStorage so the
  * next time the user opens Settings they land on the same tab.

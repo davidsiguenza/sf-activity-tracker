@@ -271,6 +271,37 @@ Wellness</textarea>
         <h3>Google Calendar backend</h3>
         <p class="hint">Conecta tu Google Calendar para fetch directo (rápido, sin tokens LLM). Setup en la app, sin terminal.</p>
 
+        <details class="setup-help">
+          <summary>¿Cómo configuro esto? <span class="hint">(pasos manuales o pídeselo a tu IA)</span></summary>
+          <div class="setup-help-body">
+            <p><b>Pasos manuales</b> (5 min):</p>
+            <ol>
+              <li>Abre <a href="https://console.cloud.google.com/apis/credentials" target="_blank">GCP Console → Credentials</a> y crea (o reusa) un proyecto.</li>
+              <li>Habilita <b>Google Calendar API</b> en el library del proyecto.</li>
+              <li>Credentials → <b>Create credentials</b> → OAuth client ID → tipo <b>Desktop app</b>.</li>
+              <li>En "Authorized redirect URIs" añade exactamente: <code style="user-select: all;">http://127.0.0.1:7825/api/oauth/callback</code></li>
+              <li>Descarga el JSON, pégalo en "Paso 1" abajo, y pulsa "Save client JSON".</li>
+              <li>Pulsa <b>Connect with Google</b>.</li>
+            </ol>
+            <div class="ai-prompt-block">
+              <header><span>📋 Prompt para tu IA</span><button class="copy-prompt-btn">Copiar</button></header>
+              <pre>Ayúdame a conectar Google Calendar al sf-activity-tracker que tengo
+corriendo en localhost:7825 en este Mac.
+
+1. Abre https://console.cloud.google.com/apis/credentials en mi
+   navegador. Si no tengo proyecto, créame uno. Si ya hay uno,
+   úsalo.
+2. Habilita "Google Calendar API" para ese proyecto.
+3. Crea un OAuth client ID tipo "Desktop app".
+4. En "Authorized redirect URIs" añade EXACTAMENTE:
+   http://127.0.0.1:7825/api/oauth/callback
+5. Descarga el JSON resultante y pégame su contenido aquí — yo lo
+   guardo en Settings → Calendario → Paso 1 de la app.
+6. Reporta cualquier error o paso que no haya quedado claro.</pre>
+            </div>
+          </div>
+        </details>
+
         <div id="google-oauth-status" class="hint">Comprobando…</div>
 
         <!-- Step 1: Upload OAuth client JSON -->
@@ -334,11 +365,85 @@ Wellness</textarea>
         <div style="display: flex; gap: 8px; flex-wrap: wrap;">
           <button class="btn btn-primary" id="sf-backend-test-btn">Test connection (both)</button>
         </div>
+
+        <details class="setup-help">
+          <summary>¿Cómo configuro el <code>sf</code> CLI? <span class="hint">(necesario para modo CLI o auto)</span></summary>
+          <div class="setup-help-body">
+            <p><b>Pasos manuales</b>:</p>
+            <ol>
+              <li>Comprueba que tienes <code>sf</code>: <code>sf --version</code></li>
+              <li>Si no: <code>npm install -g @salesforce/cli</code></li>
+              <li>Login a org62 (la variable de entorno es necesaria en red corporativa SF):<br><code style="user-select: all;">SFDX_DISABLE_DNS_CHECK=true sf org login web --alias org62</code></li>
+              <li>Valida: <code>sf org display --target-org org62 --json</code></li>
+            </ol>
+            <div class="ai-prompt-block">
+              <header><span>📋 Prompt para tu IA</span><button class="copy-prompt-btn">Copiar</button></header>
+              <pre>Necesito que el `sf` CLI esté conectado a la org62 de Salesforce en
+este Mac para usarlo con sf-activity-tracker. Por favor:
+
+1. Comprueba si `sf` está instalado: ejecuta `sf --version`.
+2. Si no está, instálalo: `npm install -g @salesforce/cli`.
+3. Comprueba si ya tengo el alias org62 logueado:
+   `sf org display --target-org org62 --json`
+   Si devuelve `instanceUrl` y `username`, ya está hecho — salta
+   al paso 5.
+4. Si no, haz login. En red SF corporativa hace falta deshabilitar
+   el DNS check:
+   `SFDX_DISABLE_DNS_CHECK=true sf org login web --alias org62`
+   Espera a que termine el flujo OAuth en el navegador.
+5. Valida con `sf org display --target-org org62 --json` y pégame
+   la salida completa.
+6. Reporta cualquier error que aparezca en el camino.</pre>
+            </div>
+          </div>
+        </details>
       </section>
 
       <section id="sf-mcp-section">
         <h3>Backend Salesforce — MCP config</h3>
         <p class="hint">Configura aquí la conexión MCP. Lee/escribe en org62 vía los endpoints MCP HTTP de Salesforce, autenticando por OAuth interactivo. Si arriba está seleccionado "Solo CLI", esto solo se usa cuando lo cambies.</p>
+
+        <details class="setup-help">
+          <summary>¿Cómo configuro el MCP? <span class="hint">(útil si el CLI no te funciona)</span></summary>
+          <div class="setup-help-body">
+            <p><b>Pasos manuales</b>:</p>
+            <ol>
+              <li>El clientId ya viene pre-rellenado (público, sin secret). No tienes que tocarlo.</li>
+              <li>Verifica que los campos están en sus defaults: host <code>localhost</code>, puerto <code>8082</code>, path <code>/callback</code>.</li>
+              <li>Pulsa <b>Save config</b> si has tocado algo.</li>
+              <li>Pulsa <b>⚡ Connect via OAuth</b>. Se abre el navegador → loguéate en org62 → autoriza.</li>
+              <li>El estado debe pasar a <code>✓ Conectado</code>.</li>
+              <li>Pulsa <b>Test (tools/list)</b> para validar.</li>
+            </ol>
+            <div class="ai-prompt-block">
+              <header><span>📋 Prompt para tu IA</span><button class="copy-prompt-btn">Copiar</button></header>
+              <pre>Necesito conectar el backend MCP de Salesforce a sf-activity-tracker
+en este Mac. La app está en localhost:7825. Por favor guíame:
+
+1. Abro la app y voy a Settings → Cuenta → "Backend Salesforce — MCP
+   config".
+2. Verifica que clientId NO está vacío (debe empezar por 3MVG9...).
+3. Confirma estos valores:
+   - Redirect host: localhost
+   - Callback port: 8082
+   - Redirect path: /callback
+   - Redirect URI calculado: http://localhost:8082/callback
+4. Pulso "Save config" si he tocado algo.
+5. Pulso "⚡ Connect via OAuth". Se abre navegador → login org62 →
+   Allow. La pestaña debería cerrarse sola con "✓ Connected".
+6. Vuelvo a la app: el estado pasa a "✓ Conectado".
+7. Pulso "Test (tools/list)" — debe devolver una lista de tools en
+   verde.
+
+Si algo falla, pídeme:
+- El mensaje de error exacto (URL del navegador si OAuth peta)
+- El contenido de ~/Library/Logs/sf-activity-tracker.log (últimas
+  50 líneas)
+y diagnóstica.</pre>
+            </div>
+          </div>
+        </details>
+
 
         <div id="sf-mcp-status" class="hint" style="margin: 8px 0;">Comprobando…</div>
 

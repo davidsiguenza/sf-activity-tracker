@@ -496,3 +496,46 @@ pre { background: #f6f8fa; padding: 12px; border-radius: 4px; overflow: auto; fo
 }
 .calendar-picker-list .cal-name { flex-grow: 1; }
 .calendar-picker-list .cal-meta { color: var(--muted); font-size: 11px; }
+
+/* Inline setup help — collapsible <details> blocks with manual steps +
+ * a copy-able AI prompt. One per section that needs setup guidance. */
+.setup-help {
+  margin: 10px 0 4px 0;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  background: #f9fafb;
+  padding: 0;
+}
+.setup-help[open] { background: #fff; border-style: solid; }
+.setup-help > summary {
+  cursor: pointer; padding: 8px 12px; font-size: 12px;
+  color: var(--muted); user-select: none;
+}
+.setup-help > summary:hover { color: var(--text); }
+.setup-help[open] > summary { border-bottom: 1px solid var(--border); }
+.setup-help-body { padding: 12px; font-size: 13px; }
+.setup-help-body ol { margin: 4px 0 10px 18px; padding: 0; }
+.setup-help-body ol li { margin: 4px 0; }
+.setup-help-body p { margin: 8px 0; }
+.ai-prompt-block {
+  margin-top: 10px; border: 1px solid var(--border); border-radius: 4px;
+  background: #f6f8fa;
+}
+.ai-prompt-block header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 6px 10px; border-bottom: 1px solid var(--border);
+  font-size: 11px; color: var(--muted); font-weight: 600;
+}
+.ai-prompt-block pre {
+  margin: 0; padding: 10px 12px; background: #fff; border-radius: 0;
+  font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word;
+  border: none;
+}
+.copy-prompt-btn {
+  border: 1px solid var(--border); background: #fff; color: var(--muted);
+  padding: 2px 8px; border-radius: 3px; cursor: pointer; font-size: 11px;
+  font-family: inherit; font-weight: 600;
+  white-space: nowrap;
+}
+.copy-prompt-btn:hover { background: #f0f0f3; color: var(--text); }
+.copy-prompt-btn.is-copied { background: #dafbe1; color: #1a7f37; border-color: #4ac26b; }
