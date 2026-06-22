@@ -95,6 +95,21 @@ const SE_TASK_TYPES = [
 
 document.addEventListener('DOMContentLoaded', init);
 
+// Settings + Help buttons are wired at DOM ready (NOT inside showApp) so they
+// work even when the setup wizard is showing — otherwise a user with no backend
+// connected gets stuck: the wizard can't resolve their user against org62, and
+// they can't open Settings to fix the backend config.
+document.addEventListener('DOMContentLoaded', () => {
+  const settingsBtn = document.getElementById('settings-btn');
+  const helpBtn = document.getElementById('help-btn');
+  if (settingsBtn) settingsBtn.addEventListener('click', openSettings);
+  if (helpBtn) helpBtn.addEventListener('click', () => {
+    document.getElementById('help-modal').classList.remove('hidden');
+  });
+  const settingsClose = document.getElementById('settings-close');
+  if (settingsClose) settingsClose.addEventListener('click', closeSettings);
+});
+
 async function init() {
   const cfgResp = await fetchJson('/api/config');
   if (!cfgResp.configured) {
@@ -194,6 +209,29 @@ function showSetup(defaults) {
 
   resolveBtn.addEventListener('click', () => doResolve(emailInput.value.trim()));
 
+  // Open Settings directly from the wizard so the user can configure their
+  // backend before trying to resolve. After closing Settings, re-attempt
+  // auto-resolve in case they just connected one.
+  const openSettingsBtn = document.getElementById('setup-open-settings-btn');
+  if (openSettingsBtn) {
+    openSettingsBtn.addEventListener('click', async () => {
+      await openSettings();
+      // When the user closes Settings, retry whoami so the email auto-fills
+      // and resolve runs if a backend just came online.
+      const onClose = async () => {
+        document.getElementById('settings-close').removeEventListener('click', onClose);
+        try {
+          const r = await fetchJson('/api/setup/whoami');
+          if (r?.username) {
+            emailInput.value = r.username;
+            await doResolve(r.username);
+          }
+        } catch { /* ignore — user can click Resolver manually */ }
+      };
+      document.getElementById('settings-close').addEventListener('click', onClose);
+    });
+  }
+
   // Auto-detect from `sf` CLI. The app only logs activities for the user
   // authenticated against org62 — so pre-fill and auto-resolve. User can still
   // override manually if the CLI is misconfigured.
@@ -271,11 +309,8 @@ function showApp() {
   document.getElementById('analyze-btn').addEventListener('click', runAnalyze);
   document.getElementById('create-btn').addEventListener('click', runCreate);
   document.getElementById('export-btn').addEventListener('click', exportSelection);
-  document.getElementById('settings-btn').addEventListener('click', openSettings);
-  document.getElementById('settings-close').addEventListener('click', closeSettings);
-  document.getElementById('help-btn').addEventListener('click', () => {
-    document.getElementById('help-modal').classList.remove('hidden');
-  });
+  // settings/help buttons are wired at DOM ready (below) so they work even
+  // when the setup wizard is showing and showApp() hasn't run yet.
   document.getElementById('help-close').addEventListener('click', () => {
     document.getElementById('help-modal').classList.add('hidden');
   });
@@ -1708,26 +1743,31 @@ function appendLog(textStr, kind) {
 
 async function openSettings() {
   const cfg = await fetchJson('/api/config');
-  state.config = cfg.config;
+  const hasConfig = !!(cfg && cfg.configured && cfg.config);
+  if (hasConfig) state.config = cfg.config;
   document.getElementById('settings-modal').classList.remove('hidden');
-  document.getElementById('config-raw').textContent = JSON.stringify(cfg.config, null, 2);
-  document.getElementById('settings-excluded').value = (cfg.config.excludedTitles || []).join('\n');
+  document.getElementById('config-raw').textContent = JSON.stringify(cfg, null, 2);
+  document.getElementById('settings-excluded').value = (cfg.config?.excludedTitles || []).join('\n');
 
   // Identidad — read-only, derivada del setup. La org auth manda; no editable aquí.
   const idDisplay = document.getElementById('account-identity-display');
   if (idDisplay) {
     idDisplay.replaceChildren();
-    idDisplay.appendChild(text(`Logueado en org62 como `));
-    const b = document.createElement('b'); b.textContent = cfg.config.seName || '?'; idDisplay.appendChild(b);
-    idDisplay.appendChild(text(` (${cfg.config.seEmail || '?'}). User Id: ${cfg.config.seUserId || '?'} · TZ ${cfg.config.timeZone || '?'}.`));
-    const br = document.createElement('br'); idDisplay.appendChild(br);
-    idDisplay.appendChild(text('Esta identidad se auto-detecta del '));
-    const code = document.createElement('code'); code.textContent = 'sf'; idDisplay.appendChild(code);
-    idDisplay.appendChild(text(' CLI en cada nuevo setup. Si necesitas cambiarla, re-autentícate con '));
-    const code2 = document.createElement('code'); code2.textContent = 'sf org login web --alias org62'; idDisplay.appendChild(code2);
-    idDisplay.appendChild(text(' y borra '));
-    const code3 = document.createElement('code'); code3.textContent = '~/.config/sf-activity-tracker/config.json'; idDisplay.appendChild(code3);
-    idDisplay.appendChild(text('.'));
+    if (!hasConfig) {
+      idDisplay.appendChild(text('Setup pendiente. Conecta un backend (CLI o MCP) más abajo y luego cierra Settings para volver al wizard y resolver tu user en org62.'));
+    } else {
+      idDisplay.appendChild(text(`Logueado en org62 como `));
+      const b = document.createElement('b'); b.textContent = cfg.config.seName || '?'; idDisplay.appendChild(b);
+      idDisplay.appendChild(text(` (${cfg.config.seEmail || '?'}). User Id: ${cfg.config.seUserId || '?'} · TZ ${cfg.config.timeZone || '?'}.`));
+      const br = document.createElement('br'); idDisplay.appendChild(br);
+      idDisplay.appendChild(text('Esta identidad se auto-detecta del '));
+      const code = document.createElement('code'); code.textContent = 'sf'; idDisplay.appendChild(code);
+      idDisplay.appendChild(text(' CLI en cada nuevo setup. Si necesitas cambiarla, re-autentícate con '));
+      const code2 = document.createElement('code'); code2.textContent = 'sf org login web --alias org62'; idDisplay.appendChild(code2);
+      idDisplay.appendChild(text(' y borra '));
+      const code3 = document.createElement('code'); code3.textContent = '~/.config/sf-activity-tracker/config.json'; idDisplay.appendChild(code3);
+      idDisplay.appendChild(text('.'));
+    }
   }
 
   // SF MCP backend (Fase 1) — load current state into the form
@@ -1736,24 +1776,26 @@ async function openSettings() {
   // Backend router (Fase 3) — mode + preferred + active
   await refreshSfBackendSection();
 
-  // Activate the last-used tab (or default to "calendar")
-  const lastTab = localStorage.getItem('sfat:settingsTab') || 'calendar';
+  // During setup, land on the Cuenta tab so the user sees backend config first.
+  const lastTab = hasConfig
+    ? (localStorage.getItem('sfat:settingsTab') || 'calendar')
+    : 'account';
   switchSettingsTab(lastTab);
 
   // Google API section
   await refreshGoogleApiSection();
   // Calendar picker — only meaningful when Google API is configured
-  await refreshCalendarPicker();
+  if (hasConfig) await refreshCalendarPicker();
   // DC filtering rules
-  await refreshDcFiltersSection();
+  if (hasConfig) await refreshDcFiltersSection();
   // Classification cache stats
   await refreshClassCacheSection();
 
   const aliasBody = document.querySelector('#alias-table tbody');
   aliasBody.replaceChildren();
-  const aliases = cfg.config.aliasTable || [];
+  const aliases = cfg.config?.aliasTable || [];
   if (!aliases.length) {
-    aliasBody.appendChild(emptyTableRow(2, 'Sin aliases todavía. Se aprenden corrigiendo el matching.'));
+    aliasBody.appendChild(emptyTableRow(2, hasConfig ? 'Sin aliases todavía. Se aprenden corrigiendo el matching.' : 'Disponible tras completar el setup.'));
   } else {
     for (const a of aliases) {
       const tr = document.createElement('tr');
@@ -1770,9 +1812,9 @@ async function openSettings() {
 
   const corrBody = document.querySelector('#correction-table tbody');
   corrBody.replaceChildren();
-  const corrections = cfg.config.taxonomyCorrections || [];
+  const corrections = cfg.config?.taxonomyCorrections || [];
   if (!corrections.length) {
-    corrBody.appendChild(emptyTableRow(2, 'Sin correcciones todavía.'));
+    corrBody.appendChild(emptyTableRow(2, hasConfig ? 'Sin correcciones todavía.' : 'Disponible tras completar el setup.'));
   } else {
     for (const c of corrections) {
       const tr = document.createElement('tr');
@@ -1783,7 +1825,7 @@ async function openSettings() {
   }
 
   const cd = document.getElementById('catchall-display');
-  cd.textContent = cfg.config.catchAll ? `${cfg.config.catchAll.type}: ${cfg.config.catchAll.name}` : 'No configurado.';
+  cd.textContent = cfg.config?.catchAll ? `${cfg.config.catchAll.type}: ${cfg.config.catchAll.name}` : 'No configurado.';
 }
 
 function closeSettings() {
