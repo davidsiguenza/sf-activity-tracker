@@ -2108,6 +2108,9 @@ async function refreshGoogleApiSection() {
     refreshBackendBadge();
   };
 
+  const resetBtn = document.getElementById('oauth-reset-btn');
+  if (resetBtn) resetBtn.onclick = () => resetGoogleCredentials();
+
   clearBtn.onclick = async () => {
     await fetchJson('/api/calendar/clear-cache', { method: 'POST' });
     statusEl.textContent = 'Calendar cache cleared.';
@@ -2370,11 +2373,51 @@ async function loadCalendarPicker() {
       listEl.appendChild(row);
     }
   } catch (e) {
-    const hint = document.createElement('span');
-    hint.className = 'hint';
-    hint.style.color = '#82071e';
-    hint.textContent = `Error: ${e.message}`;
-    listEl.appendChild(hint);
+    listEl.replaceChildren();
+    const msg = String(e.message || '');
+    // Specifically detect the "GCP project was deleted" failure mode: the
+    // tokens are still formally valid but the project they belong to is gone,
+    // so every API call returns 403 PERMISSION_DENIED. Offer one-click reset.
+    const projectDeleted = /has been deleted|PERMISSION_DENIED.*deleted|Project [^ ]+ has been deleted/i.test(msg);
+    if (projectDeleted) {
+      const banner = document.createElement('div');
+      banner.style.cssText = 'background:#ffebe9;border:1px solid #ff8182;color:#82071e;padding:8px 10px;border-radius:4px;font-size:12px;';
+      const m = msg.match(/Project ([^ ]+) has been deleted/);
+      const proj = m ? m[1] : 'el proyecto GCP';
+      banner.innerHTML = `<b>El proyecto GCP "${proj}" ya no existe.</b><br>` +
+        'Los tokens guardados apuntan a un proyecto que fue borrado. ' +
+        'Crea un nuevo proyecto en GCP Console, configúralo siguiendo el ' +
+        'bloque "¿Cómo configuro esto?" arriba, y pulsa <b>↺ Reset Google credentials</b> ' +
+        'antes de subir el nuevo JSON.';
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-primary';
+      btn.style.marginTop = '8px';
+      btn.textContent = '↺ Reset ahora';
+      btn.onclick = () => resetGoogleCredentials();
+      banner.appendChild(document.createElement('br'));
+      banner.appendChild(btn);
+      listEl.appendChild(banner);
+    } else {
+      const hint = document.createElement('span');
+      hint.className = 'hint';
+      hint.style.color = '#82071e';
+      hint.textContent = `Error: ${msg}`;
+      listEl.appendChild(hint);
+    }
+  }
+}
+
+async function resetGoogleCredentials() {
+  if (!confirm('Esto borra TODO el state de Google: client JSON + tokens + caché de calendar. Después tendrás que subir un client JSON nuevo y volver a autorizar. ¿Continuar?')) return;
+  try {
+    await fetchJson('/api/oauth/disconnect', { method: 'POST', body: { alsoForgetClient: true } });
+    await fetchJson('/api/calendar/clear-cache', { method: 'POST' });
+    await refreshGoogleApiSection();
+    await refreshCalendarPicker();
+    refreshBackendBadge();
+    alert('✓ Credenciales borradas. Sube un client JSON nuevo en "Paso 1" y vuelve a Connect.');
+  } catch (e) {
+    alert(`Error al resetear: ${e.message}`);
   }
 }
 
