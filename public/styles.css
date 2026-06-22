@@ -71,6 +71,7 @@ main { padding: 16px 24px 80px 24px; max-width: 1400px; margin: 0 auto; }
   font-size: 13px;
   font-weight: 500;
   transition: background 0.15s;
+  white-space: nowrap;
 }
 .btn:hover { background: #f0f0f3; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -102,6 +103,7 @@ textarea { font-family: inherit; }
   padding: 4px 10px; border-radius: 12px;
   border: 1px solid var(--border); background: #f6f8fa;
   margin: 0;
+  white-space: nowrap;
 }
 .force-refresh-toggle input { margin: 0; }
 .cache-info {
@@ -140,6 +142,7 @@ textarea { font-family: inherit; }
   border: 1px solid var(--border); background: #fff; color: var(--muted);
   font-family: inherit;
   transition: background 0.12s, border-color 0.12s;
+  white-space: nowrap;
 }
 .chip-action:hover { background: #f0f0f3; border-color: var(--muted); color: var(--text); }
 .toggle-logged {
@@ -148,11 +151,13 @@ textarea { font-family: inherit; }
   font-size: 12px; color: var(--muted); cursor: pointer;
   padding: 4px 10px; border-radius: 12px;
   border: 1px solid var(--border); background: #f6f8fa;
+  white-space: nowrap;
 }
 .toggle-logged input { margin: 0; }
 .chip {
   padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 500;
   border: 1px solid var(--border); background: #f6f8fa;
+  white-space: nowrap;
 }
 .chip-id { background: #ddf4ff; border-color: #54aeff; color: #0969da; }
 .chip-logged { background: #e6e6e6; border-color: #b0adab; color: #555; }
@@ -181,6 +186,7 @@ textarea { font-family: inherit; }
   padding: 3px 10px; border-radius: 12px; font-size: 12px;
   border: 1px solid var(--border); background: #f6f8fa; cursor: pointer;
   user-select: none;
+  white-space: nowrap;
 }
 .filter-pill:hover { background: #e6eaf0; }
 .filter-pill.is-on { background: var(--primary); color: #fff; border-color: var(--primary); }
